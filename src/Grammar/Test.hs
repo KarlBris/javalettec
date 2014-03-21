@@ -5,16 +5,16 @@ module Main where
 import System.IO ( stdin, hGetContents )
 import System.Environment ( getArgs, getProgName )
 
-import Javalette.Lex
-import Javalette.Par
-import Javalette.Skel
-import Javalette.Print
-import Javalette.Abs
+import Grammar.Lex
+import Grammar.Par
+import Grammar.Skel
+import Grammar.Print
+import Grammar.Abs
 
 
 
 
-import Javalette.ErrM
+import Grammar.ErrM
 
 type ParseFun a = [Token] -> Err a
 

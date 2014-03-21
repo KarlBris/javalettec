@@ -1,3 +1,3 @@
-import Javalette.Abs
+import Grammar.Abs
 
 main = print "OK"

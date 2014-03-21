@@ -1,10 +1,10 @@
 {-# OPTIONS_GHC -w #-}
 {-# OPTIONS -fglasgow-exts -cpp #-}
 {-# OPTIONS_GHC -fno-warn-incomplete-patterns -fno-warn-overlapping-patterns #-}
-module Javalette.Par where
-import Javalette.Abs
-import Javalette.Lex
-import Javalette.ErrM
+module Grammar.Par where
+import Grammar.Abs
+import Grammar.Lex
+import Grammar.ErrM
 import qualified Data.Array as Happy_Data_Array
 import qualified GHC.Exts as Happy_GHC_Exts
 
