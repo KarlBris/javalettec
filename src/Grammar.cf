@@ -92,6 +92,8 @@ EAnd.      Expr1 ::= Expr2 "&&" Expr1 ;
 
 EOr.       Expr ::= Expr1 "||" Expr ;
 
+internal ETyped. Expr ::= "[" Expr ":" Type "]" ;
+
 coercions  Expr 6 ;
 
 separator  Expr "," ;
