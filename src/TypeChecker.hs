@@ -1,5 +1,8 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module TypeChecker where
 
+import Control.Lens
 import Control.Monad.Trans.State.Lazy
 import Data.List
 import Grammar.Abs
@@ -9,22 +12,24 @@ import Grammar.ErrM
 type CheckM a = StateT SEnv Err a
 
 data SEnv = E {
-  currentReturnType :: Type,
-  symbols           :: SymbolTable,
-  env               :: Env
+  _currentReturnType :: Type,
+  _symbols           :: SymbolTable,
+  _env               :: Env
 }
 
 emptySEnv :: SEnv
 emptySEnv = E {
-	currentReturnType = undefined,
-	symbols           = [],
-	env               = []
+	_currentReturnType = undefined,
+	_symbols           = [],
+	_env               = []
 }
 
 type SymbolTable = [(Ident, [Type], Type)]
 type Env = [[(Ident, Type)]]
 
-typecheck :: Program -> Program
+makeLenses ''SEnv
+
+typecheck :: Program -> Err Program
 typecheck (Program topDefs) = undefined -- (a, s) <- runStateT asd
 
 buildSymbolTable :: [TopDef] -> CheckM () 
@@ -53,9 +58,9 @@ inferExpr e = undefined
 
 
 lookupVar :: Ident -> CheckM Type
-lookupVar x = do sEnv <- get
-                 let e = env sEnv
-                 lookupVar' e x
+lookupVar x = do
+    scopes <- use env
+    lookupVar' scopes x
   where
   	lookupVar' :: Env -> Ident -> CheckM Type
   	lookupVar' [] x           = fail $ "Undefined variable " ++ (show x) 
@@ -65,18 +70,16 @@ lookupVar x = do sEnv <- get
 
 
 addVar :: Ident -> Type -> CheckM ()
-addVar x t = modify (\sEnv -> sEnv {env = 
-  case env sEnv of 
-  	e:rest -> ((x, t):e):rest
-  	[]     -> fail "Something went wrong! Tried to add variable to environment without scopes"
-  })
+addVar var t = env %= addVar' where
+  addVar' []     = fail "Something went wrong! Tried to add variable to environment without scopes"
+  addVar' (x:xs) = ((var, t):x):xs
 
 enterScope :: CheckM ()
-enterScope = modify (\sEnv -> sEnv {env = [] : (env sEnv)})
+enterScope = env %= ([]:)
 
 exitScope :: CheckM ()
-exitScope = modify (\sEnv -> sEnv {env = exitScope' (env sEnv)})
+exitScope = env %= exitScope'
   where
   	exitScope' :: Env -> Env
-  	exitScope' []      = fail "Something went wrong! Tried to exit a block illegally"
-  	exitScope' (_:env) = env  	
+  	exitScope' [] = fail "Something went wrong! Tried to exit a block illegally"
+  	exitScope' xs = tail xs
