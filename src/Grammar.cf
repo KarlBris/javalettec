@@ -59,6 +59,7 @@ Bool.      Type ::= "boolean" ;
 Void.      Type ::= "void" ;
 
 internal   Fun. Type ::= Type "(" [Type] ")" ;
+internal   String. Type ::= "string" ;
 
 separator  Type "," ;
 
