@@ -5,6 +5,7 @@ module TypeChecker where
 import Control.Lens
 import Control.Monad.Trans.State.Lazy
 import Data.List
+import Data.Maybe
 import Grammar.Abs
 import Grammar.Print
 import Grammar.ErrM
@@ -64,12 +65,50 @@ checkArg :: Arg -> CheckM Arg
 checkArg a = undefined
 
 checkBlock :: Block -> CheckM Block
-checkBlock b = undefined
+checkBlock (Block stms) = mapM checkStmt stms >>= return.Block
 
 checkStmt :: Stmt -> CheckM Stmt
-checkStmt s = undefined
+checkStmt Empty = return Empty
 
-checkItem :: Item -> CheckM Item
+checkStmt (BStmt block) = do
+  enterScope []
+  block' <- checkBlock block
+  exitScope
+  return (BStmt block)
+
+checkStmt (Decl t items) = do
+  items' <- mapM (\i -> checkItem t i) items
+  return (Decl t items')
+
+checkStmt (Ass ident expr) = do
+  t <- lookupVar ident
+  (ETyped expr' t') <- inferExpr expr
+  assert (t == t') $ "Invalid assignment: Expected " ++ (show t) ++ ", got " ++ (show t')
+  return (Ass ident expr')
+
+checkStmt s@(Incr ident) = do
+  t <- lookupVar ident
+  assert (t `elem` [Int, Doub]) $ "Invalid increment: type " ++ (show t) ++ " does not support `++`"
+  return s
+
+checkStmt s@(Decr ident) = do
+  t <- lookupVar ident
+  assert (t `elem` [Int, Doub]) $ "Invalid decrement: type " ++ (show t) ++ " does not support `--`"
+  return s
+
+checkStmt (Ret expr) = do
+  t <- use currentReturnType
+  (ETyped expr' t') <- inferExpr expr
+  assert (t == t') $ "Invalid return: Expected " ++ (show t) ++ ", got " ++ (show t')
+  return (Ret expr')
+  
+--checkStmt VRet
+--checkStmt Cond Expr Stmt
+--checkStmt CondElse Expr Stmt Stmt
+--checkStmt While Expr Stmt
+--checkStmt SExp Expr
+
+checkItem :: Type -> Item -> CheckM Item
 checkItem i = undefined
 
 inferExpr :: Expr -> CheckM Expr
@@ -92,8 +131,9 @@ lookupVar x = do
 
 addVar :: Ident -> Type -> CheckM ()
 addVar var t = env %= addVar' where
-  addVar' []     = fail "Something went wrong! Tried to add variable to environment without scopes"
-  addVar' (x:xs) = ((var, t):x):xs
+  addVar' []     = fail $ "Something went wrong! Tried to add variable " ++ (show var) ++ " to environment without scopes"
+  addVar' (x:xs) | isJust (lookup var x) = fail $ "Redeclaration of variable " ++ (show var)
+                 | otherwise = ((var, t):x):xs
 
 enterScope :: [(Ident, Type)] -> CheckM ()
 enterScope scope = env %= (scope:)
@@ -105,6 +145,9 @@ exitScope = env %= exitScope'
   	exitScope' [] = fail "Something went wrong! Tried to exit a block illegally"
   	exitScope' xs = tail xs
 
+assert :: Bool -> String -> CheckM ()
+assert True _    = return ()
+assert False msg = fail msg
 
 
 duplicates :: Eq a => [a] -> [a]
