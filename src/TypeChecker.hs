@@ -82,7 +82,7 @@ checkStmt (Decl t items) = do
 
 checkStmt (Ass ident expr) = do
   t <- lookupVar ident
-  (ETyped expr' t') <- inferExpr expr
+  expr'@(ETyped _ t') <- inferExpr expr
   assert (t == t') $ "Invalid assignment: Expected " ++ (show t) ++ ", got " ++ (show t')
   return (Ass ident expr')
 
@@ -98,7 +98,7 @@ checkStmt s@(Decr ident) = do
 
 checkStmt (Ret expr) = do
   t <- use currentReturnType
-  (ETyped expr' t') <- inferExpr expr
+  expr'@(ETyped _ t') <- inferExpr expr
   assert (t == t') $ "Invalid return: Expected " ++ (show t) ++ ", got " ++ (show t')
   return (Ret expr')
   
