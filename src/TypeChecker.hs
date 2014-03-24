@@ -9,6 +9,7 @@ import Grammar.Abs
 import Grammar.Print
 import Grammar.ErrM
 
+-- type for mr. dubs checkum
 type CheckM a = StateT SEnv Err a
 
 data SEnv = E {
@@ -45,7 +46,12 @@ checkSymbolTable symbols | length dups == 0 = Ok ()
                         dups = duplicates $ map (\(ident,_,_) -> ident) symbols
 
 checkTopDef :: TopDef -> CheckM TopDef
-checkTopDef td = undefined
+checkTopDef (FnDef t ident args block) = do
+    currentReturnType .= t
+    enterScope $ map (\(Arg t i) -> (i, t)) args
+    block' <- checkBlock block
+    exitScope
+    return (FnDef t ident args block')
 
 checkArg :: Arg -> CheckM Arg
 checkArg a = undefined
@@ -82,8 +88,8 @@ addVar var t = env %= addVar' where
   addVar' []     = fail "Something went wrong! Tried to add variable to environment without scopes"
   addVar' (x:xs) = ((var, t):x):xs
 
-enterScope :: CheckM ()
-enterScope = env %= ([]:)
+enterScope :: [(Ident, Type)] -> CheckM ()
+enterScope scope = env %= (scope:)
 
 exitScope :: CheckM ()
 exitScope = env %= exitScope'
