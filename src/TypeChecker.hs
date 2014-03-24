@@ -34,10 +34,17 @@ typecheck :: Program -> Err Program
 typecheck (Program topDefs) = undefined -- (a, s) <- runStateT asd
 
 buildSymbolTable :: [TopDef] -> SymbolTable
-buildSymbolTable []                           = []
+buildSymbolTable []                           = primitiveFunctions
 buildSymbolTable ((FnDef t ident args _):tds) = (ident, map typeOf args, t):(buildSymbolTable tds)
   where 
   	typeOf (Arg t ident) = t
+
+primitiveFunctions :: SymbolTable
+primitiveFunctions = [ ("printInt",    [Int],    Void  )
+                     , ("printDouble", [Double], Void  )
+                     , ("printString", [String], Void  )
+                     , ("readInt",     [],       Int   )
+                     , ("readDouble",  [],       Double)]
 
 checkSymbolTable :: SymbolTable -> Err ()
 checkSymbolTable symbols | length dups == 0 = Ok ()
