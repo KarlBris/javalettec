@@ -40,11 +40,11 @@ buildSymbolTable ((FnDef t ident args _):tds) = (ident, map typeOf args, t):(bui
   	typeOf (Arg t ident) = t
 
 primitiveFunctions :: SymbolTable
-primitiveFunctions = [ ("printInt",    [Int],    Void  )
-                     , ("printDouble", [Double], Void  )
-                     , ("printString", [String], Void  )
-                     , ("readInt",     [],       Int   )
-                     , ("readDouble",  [],       Double)]
+primitiveFunctions = [ (Ident "printInt",    [Int],  Void)
+                     , (Ident "printDouble", [Doub], Void)
+                     , (Ident "printString", [],     Void) --fix string
+                     , (Ident "readInt",     [],     Int )
+                     , (Ident "readDouble",  [],     Doub)]
 
 checkSymbolTable :: SymbolTable -> Err ()
 checkSymbolTable symbols | length dups == 0 = Ok ()
