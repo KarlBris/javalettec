@@ -14,7 +14,7 @@ type CheckM a = StateT SEnv Err a
 data SEnv = E {
   _currentReturnType :: Type,
   _symbols           :: SymbolTable,
-  _env               :: Env
+  _env               :: ScopeList
 }
 
 emptySEnv :: SEnv
@@ -25,16 +25,24 @@ emptySEnv = E {
 }
 
 type SymbolTable = [(Ident, [Type], Type)]
-type Env = [[(Ident, Type)]]
+type ScopeList = [[(Ident, Type)]]
 
 makeLenses ''SEnv
 
 typecheck :: Program -> Err Program
 typecheck (Program topDefs) = undefined -- (a, s) <- runStateT asd
 
-buildSymbolTable :: [TopDef] -> CheckM () 
-buildSymbolTable []       = undefined
-buildSymbolTable (td:tds) = undefined
+buildSymbolTable :: [TopDef] -> SymbolTable
+buildSymbolTable []                           = []
+buildSymbolTable ((FnDef t ident args _):tds) = (ident, map typeOf args, t):(buildSymbolTable tds)
+  where 
+  	typeOf (Arg t ident) = t
+
+checkSymbolTable :: SymbolTable -> Err ()
+checkSymbolTable symbols | length dups == 0 = Ok ()
+                         | otherwise = fail $ (show $ head dups) ++ " is already defined"
+                      where
+                        dups = duplicates $ map (\(ident,_,_) -> ident) symbols
 
 checkTopDef :: TopDef -> CheckM TopDef
 checkTopDef td = undefined
@@ -62,7 +70,7 @@ lookupVar x = do
     scopes <- use env
     lookupVar' scopes x
   where
-  	lookupVar' :: Env -> Ident -> CheckM Type
+  	lookupVar' :: ScopeList -> Ident -> CheckM Type
   	lookupVar' [] x           = fail $ "Undefined variable " ++ (show x) 
   	lookupVar' (scope:rest) x = case lookup x scope of
                                   Nothing -> lookupVar' rest x
@@ -80,6 +88,12 @@ enterScope = env %= ([]:)
 exitScope :: CheckM ()
 exitScope = env %= exitScope'
   where
-  	exitScope' :: Env -> Env
+  	exitScope' :: ScopeList -> ScopeList
   	exitScope' [] = fail "Something went wrong! Tried to exit a block illegally"
   	exitScope' xs = tail xs
+
+
+
+duplicates :: Eq a => [a] -> [a]
+duplicates [] = []
+duplicates (x:xs) = filter (`elem` xs) [x] ++ duplicates xs
