@@ -14,16 +14,18 @@ import Grammar.ErrM
 type CheckM a = StateT SEnv Err a
 
 data SEnv = E {
-  _currentReturnType :: Type,
-  _symbols           :: SymbolTable,
-  _env               :: ScopeList
+  _fnType     :: Type,
+  _fnReturned :: Bool,
+  _symbols    :: SymbolTable,
+  _env        :: ScopeList
 } deriving Show
 
 emptySEnv :: SEnv
 emptySEnv = E {
-	_currentReturnType = Void,
-	_symbols           = [],
-	_env               = []
+  _fnType            = Void,
+  _fnReturned        = False,
+  _symbols           = [],
+  _env               = []
 }
 
 type SymbolTable = [(Ident, ([Type], Type))]
@@ -42,7 +44,7 @@ buildSymbolTable :: [TopDef] -> SymbolTable
 buildSymbolTable []                           = primitiveFunctions
 buildSymbolTable ((FnDef t ident args _):tds) = (ident, (map typeOf args, t)):(buildSymbolTable tds)
   where 
-  	typeOf (Arg t ident) = t
+    typeOf (Arg t ident) = t
 
 primitiveFunctions :: SymbolTable
 primitiveFunctions = [ (Ident "printInt",    ([Int],  Void))
@@ -59,11 +61,18 @@ checkSymbolTable symbols | length dups == 0 = Ok ()
 
 checkTopDef :: TopDef -> CheckM TopDef
 checkTopDef (FnDef t ident args block) = do
-    currentReturnType .= t
+    fnType .= t
+    fnReturned .= False
+
     enterScope
     mapM_ (\(Arg t i) -> addVar i t) args
     block' <- checkBlock block
     exitScope
+
+    -- Check explicit return
+    didReturn <- use fnReturned
+    assert (didReturn || t == Void) $ "Implicit return for non-void function"
+
     return (FnDef t ident args block')
 
 checkBlock :: Block -> CheckM Block
@@ -85,7 +94,7 @@ checkStmt (Decl t items) = do
 checkStmt (Ass ident expr) = do
   t <- lookupVar ident
   expr'@(ETyped _ t') <- inferExpr expr
-  assert (t == t') $ "Invalid assignment: Expected " ++ (show t) ++ ", got " ++ (show t')
+  assert (t == t') $ "Invalid assignment: expected " ++ (show t) ++ ", got " ++ (show t')
   return (Ass ident expr')
 
 checkStmt s@(Incr ident) = do
@@ -99,13 +108,14 @@ checkStmt s@(Decr ident) = do
   return s
 
 checkStmt (Ret expr) = do
-  t <- use currentReturnType
+  t <- use fnType
   expr'@(ETyped _ t') <- inferExpr expr
-  assert (t == t') $ "Invalid return: Expected " ++ (show t) ++ ", got " ++ (show t')
+  assert (t == t') $ "Invalid return: expected " ++ (show t) ++ ", got " ++ (show t')
+  fnReturned .= True
   return (Ret expr')
 
 checkStmt VRet = do
-  t <- use currentReturnType
+  t <- use fnType
   assert (t == Void) $ "Invalid empty return: should be " ++ (show t)
   return VRet
 
@@ -148,7 +158,7 @@ checkItem t (NoInit ident) = do
   return $ NoInit ident
 checkItem t (Init ident expr) = do
   expr'@(ETyped _ t') <- inferExpr expr
-  assert (t == t') $ "Invalid variale initialization: Expected " ++ (show t) ++ ", got " ++ (show t')
+  assert (t == t') $ "Invalid variale initialization: expected " ++ (show t) ++ ", got " ++ (show t')
   addVar ident t
   return $ Init ident expr'
 
@@ -255,18 +265,22 @@ lookupVar x = do
     scopes <- use env
     lookupVar' scopes x
   where
-  	lookupVar' :: ScopeList -> Ident -> CheckM Type
-  	lookupVar' [] x           = fail $ "CRITICAL ERROR: No scope to find " ++ (show x) 
-  	lookupVar' (scope:rest) x = case lookup x scope of
+    lookupVar' :: ScopeList -> Ident -> CheckM Type
+    lookupVar' [] x           = fail $ "CRITICAL ERROR: No scope to find " ++ (show x) 
+    lookupVar' (scope:rest) x = case lookup x scope of
                                   Nothing -> lookupVar' rest x
                                   Just t  -> return t
 
 
 addVar :: Ident -> Type -> CheckM ()
-addVar var t = env %= addVar' where
-  addVar' []     = fail $ "Something went wrong! Tried to add variable " ++ (show var) ++ " to environment without scopes"
-  addVar' (x:xs) | isJust (lookup var x) = fail $ "Redeclaration of variable " ++ (show var)
-                 | otherwise = ((var, t):x):xs
+addVar var t = do
+    ss <- use env
+    ss' <- addVar' ss
+    env .= ss'
+  where
+    addVar' []     = fail $ "CRITICAL: Tried to add variable " ++ (show var) ++ " to environment without scopes"
+    addVar' (x:xs) | isJust (lookup var x) = fail $ "Redeclaration of variable " ++ (show var)
+                   | otherwise = return $ ((var, t):x):xs
 
 enterScope :: CheckM ()
 enterScope = env %= ([]:)
@@ -274,9 +288,9 @@ enterScope = env %= ([]:)
 exitScope :: CheckM ()
 exitScope = env %= exitScope'
   where
-  	exitScope' :: ScopeList -> ScopeList
-  	exitScope' [] = fail "Something went wrong! Tried to exit a block illegally"
-  	exitScope' xs = tail xs
+    exitScope' :: ScopeList -> ScopeList
+    exitScope' [] = fail "Something went wrong! Tried to exit a block illegally"
+    exitScope' xs = tail xs
 
 assert :: Bool -> String -> CheckM ()
 assert True _    = return ()

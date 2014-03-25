@@ -10,7 +10,14 @@ main = do
         args <- getArgs
         case args of
           [] -> hGetContents stdin >>= compile
-          fs -> mapM_ ((compile =<<) . readFile) fs
+          fs -> mapM_ readAndCompile fs
+
+readAndCompile :: String -> IO ()
+readAndCompile fp = do
+  source <- readFile fp
+  putStrLn $ "# " ++ fp ++ ":"
+  compile source
+  putStrLn ""
 
 compile :: String -> IO ()
 compile source = do
