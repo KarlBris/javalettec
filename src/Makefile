@@ -11,12 +11,10 @@ Grammar/: Grammar.cf
 
 .PHONY: clean distclean package
 clean:
-	-rm -f Grammar/*.hi Grammar/*.o
+	-rm -f **/*.hi **/*.o
 	-rm -f *.hi *.o
-	-rm -rf build/
+	-rm -rf build
 distclean: clean
-	-rm -f Grammar/Doc.* Grammar/Lex.* Grammar/Par.* Grammar/Layout.* Grammar/Skel.* Grammar/Print.* Grammar/Test.* Grammar/Abs.* Grammar/Test Grammar/ErrM.* Grammar/SharedString.* Grammar/Grammar.dtd Grammar/XML.*
-	-rmdir -p Grammar/
 	-rm -f javalettec
 	-rm -f jlc
 package: distclean
