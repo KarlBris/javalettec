@@ -17,4 +17,3 @@ clean:
 distclean: clean
 	-rm -rf build
 	-rm -f jlc
-
