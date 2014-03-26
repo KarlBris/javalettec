@@ -13,9 +13,8 @@ Grammar/: Grammar.cf
 clean:
 	-rm -f **/*.hi **/*.o
 	-rm -f *.hi *.o
-	-rm -rf build
 distclean: clean
-	-rm -f javalettec
+	-rm -rf build
 	-rm -f jlc
 package: distclean
 	(cd ..; tar -cvz --exclude-vcs --exclude *.tar.gz -f javalettec.tar.gz ../javalettec)
