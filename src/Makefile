@@ -9,6 +9,7 @@ Grammar/: Grammar.cf
 	mv Grammar/Doc.tex ../doc/Grammar.tex
 	alex -g Grammar/Lex.x
 	happy -gca Grammar/Par.y
+	rm Grammar/*.bak
 
 .PHONY: clean distclean package
 clean:
