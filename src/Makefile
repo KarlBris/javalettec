@@ -5,7 +5,8 @@ jlc: $(SOURCES)
 
 Grammar/: Grammar.cf
 	bnfc -d Grammar.cf
-	mv Grammar/*.tex Grammar/*.txt ../doc/
+	rm Grammar/Doc.txt
+	mv Grammar/Doc.tex ../doc/Grammar.tex
 	alex -g Grammar/Lex.x
 	happy -gca Grammar/Par.y
 
@@ -16,6 +17,4 @@ clean:
 distclean: clean
 	-rm -rf build
 	-rm -f jlc
-package: distclean
-	(cd ..; tar -cvz --exclude-vcs --exclude *.tar.gz -f javalettec.tar.gz ../javalettec)
 
