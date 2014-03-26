@@ -116,26 +116,41 @@ checkStmt (Ret expr) = do
 
 checkStmt VRet = do
   t <- use fnType
-  assert (t == Void) $ "Invalid empty return: should be " ++ (show t)
+  assert (t == Void) $ "Invalid empty return for function of type " ++ (show t)
   return VRet
 
 checkStmt (Cond expr stmt) = do
+  didReturn <- use fnReturned -- save current value of fnReturned
+  fnReturned .= False
+
   expr'@(ETyped _ t) <- inferExpr expr
   assert (t == Bool) $ "Non-bool condition to if-statement: " ++ (show t)
-  enterScope -- Implicit block
   stmt' <- checkStmt stmt
-  exitScope
+  didReturn' <- use fnReturned
+
+  (fnReturned .=) $ didReturn || (didReturn' && (isLiterallyTrue expr'))
+
   return (Cond expr' stmt')
 
 checkStmt (CondElse expr stmt1 stmt2) = do
+  didReturn <- use fnReturned -- save current value of fnReturned
+
   expr'@(ETyped _ t) <- inferExpr expr
   assert (t == Bool) $ "Non-bool condition to if-statement: " ++ (show t)
-  enterScope -- Implicit block
+
+  fnReturned .= False
   stmt1' <- checkStmt stmt1
-  exitScope
-  enterScope -- Implicit block
+  didReturn1 <- use fnReturned
+
+  fnReturned .= False
   stmt2' <- checkStmt stmt2
-  exitScope
+  didReturn2 <- use fnReturned
+
+  (fnReturned .=) $ didReturn ||
+      (didReturn1 && didReturn2) ||
+      (didReturn1 && (isLiterallyTrue expr')) ||
+      (didReturn2 && (isLiterallyFalse expr'))
+
   return (CondElse expr' stmt1' stmt2')
 
 checkStmt (While expr stmt) = do
@@ -150,6 +165,24 @@ checkStmt (While expr stmt) = do
 checkStmt (SExp expr) = do
   expr' <- inferExpr expr
   return $ SExp expr'
+
+
+isLiterallyTrue :: Expr -> Bool
+isLiterallyTrue expr = case getLiteralBool expr of
+  (Bad _) -> False
+  (Ok v)  -> v == True
+
+isLiterallyFalse :: Expr -> Bool
+isLiterallyFalse expr = case getLiteralBool expr of
+  (Bad _) -> False
+  (Ok v)  -> v == False
+
+getLiteralBool :: Expr -> Err Bool
+getLiteralBool (ETyped expr t) | t /= Bool = fail "Not boolean"
+                               | otherwise = getLiteralBool expr
+getLiteralBool (ELitTrue)  = return True
+getLiteralBool (ELitFalse) = return False
+getLiteralBool _ = fail "Non-literal context"
 
 
 checkItem :: Type -> Item -> CheckM Item

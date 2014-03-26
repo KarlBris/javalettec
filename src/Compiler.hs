@@ -15,16 +15,14 @@ main = do
 readAndCompile :: String -> IO ()
 readAndCompile fp = do
   source <- readFile fp
-  putStrLn $ "# " ++ fp ++ ":"
   compile source
-  putStrLn ""
 
 compile :: String -> IO ()
 compile source = do
     let tree = check source
     case tree of
-      Bad s    -> putStrLn "ERR" >> putStrLn s
-      Ok  tree -> putStrLn "OK" >> print tree
+      Bad s    -> hPutStrLn stderr "ERR" >> hPutStrLn stderr  s
+      Ok  tree -> hPutStrLn stderr "OK"  >> hPutStrLn stderr (show tree)
 
 check :: String -> Err Program
 check source = do
