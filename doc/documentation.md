@@ -1,8 +1,19 @@
 # JLC
+An experimental compiler for the Javalette language.
+It is currently incomplete;
+it can not interpret or produce executables from javalette source code.
+
+## Dependencies
+* GHC with the Lens package
+* BNFC
+* Alex and Happy haskell libraries
+
+## Compiling
+To compile the compiler, run `make` in the src/ directory. 
+This will produce the executable jlc
 
 ## Usage
-An explanation of how the compiler is used (what options, what
-output, etc)
+The `jlc` executable is used to parse and typecheck javalette programs. It takes filename(s) as arguments or source code from stdin and outputs OK to stderr if the program was parsed and type checked without error. If an error occurs, the compiler outputs ERR to stdout followed by an error message.
 
 ## Javalette specification
 The grammar we are using is the one given on the course homepage, with a 
@@ -15,16 +26,16 @@ can fortunately be considered pretty harmless. Since the parser automatically
 performs a shift operation every time it can do either shift or reduce, its 
 behavior is well-defined:
  
-  if(a) if(b) foo(); else bar();
+    if(a) if(b) foo(); else bar();
 
 will always be parsed to 
 
-  if(a) {
-  	if(b) 
-  	  foo(); 
-  	else 
-  	  bar();
-  } 
+    if(a) {
+      if(b) 
+        foo(); 
+      else 
+        bar();
+    } 
 
 For further details, we refer to the generated Grammar.tex in the same
 directory as this file.
