@@ -154,12 +154,17 @@ checkStmt (CondElse expr stmt1 stmt2) = do
   return (CondElse expr' stmt1' stmt2')
 
 checkStmt (While expr stmt) = do
+  didReturn <- use fnReturned -- save current value of fnReturned
+  fnReturned .= False
+
   expr'@(ETyped _ t) <- inferExpr expr
   assert (t == Bool) $ "Non-bool condition ("++(show t)++") to while-statement: " ++
     (show expr)
-  enterScope -- Implicit block
   stmt' <- checkStmt stmt
-  exitScope
+
+  didReturn' <- use fnReturned
+  (fnReturned .=) $ didReturn || (didReturn' && (isLiterallyTrue expr'))
+  
   return (While expr' stmt')
 
 checkStmt (SExp expr) = do
