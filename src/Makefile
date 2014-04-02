@@ -11,10 +11,9 @@ Grammar/: Grammar.cf
 	happy -gca Grammar/Par.y
 	rm Grammar/*.bak
 
-.PHONY: clean distclean package
+.PHONY: clean distclean
 clean:
-	-rm -f **/*.hi **/*.o
-	-rm -f *.hi *.o
-distclean: clean
 	-rm -rf build
 	-rm -f jlc
+distclean: clean
+	
