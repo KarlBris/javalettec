@@ -1,5 +1,6 @@
 import System.Environment
 import System.IO
+import System.Exit
 
 import qualified Grammar.Par as Par 
 import Grammar.ErrM
@@ -21,8 +22,13 @@ compile :: String -> IO ()
 compile source = do
     let tree = check source
     case tree of
-      Bad s    -> hPutStrLn stderr "ERR" >> hPutStrLn stderr  s
-      Ok  tree -> hPutStrLn stderr "OK"  >> hPutStrLn stderr (show tree)
+      Bad s    -> do
+        hPutStrLn stderr "ERROR"
+        hPutStrLn stdout s
+        exitWith $ ExitFailure 1
+      Ok  tree -> do
+        hPutStrLn stderr "OK"
+        hPutStrLn stdout (show tree)
 
 check :: String -> Err Program
 check source = do
