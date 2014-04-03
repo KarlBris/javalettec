@@ -10,7 +10,7 @@ import TypeChecker
 main = do 
         args <- getArgs
         case args of
-          [] -> hGetContents stdin >>= compile
+          [] -> getContents >>= compile
           fs -> mapM_ readAndCompile fs
 
 readAndCompile :: String -> IO ()
@@ -24,16 +24,14 @@ compile source = do
     case tree of
       Bad s    -> do
         hPutStrLn stderr "ERROR"
-        hPutStrLn stdout s
+        putStrLn s
         exitWith $ ExitFailure 1
       Ok  tree -> do
         hPutStrLn stderr "OK"
-        hPutStrLn stdout (show tree)
+        print tree
 
 check :: String -> Err Program
 check source = do
     let tokens = Par.myLexer source
     tree  <- Par.pProgram tokens
-    tree' <- typecheck tree
-    return tree'
-      
+    typecheck tree      
