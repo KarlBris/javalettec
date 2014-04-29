@@ -6,6 +6,7 @@ import qualified Grammar.Par as Par
 import Grammar.ErrM
 import Grammar.Abs
 import TypeChecker
+import CodeGenerator
 
 main = do 
         args <- getArgs
@@ -28,7 +29,7 @@ compile source = do
         exitWith $ ExitFailure 1
       Ok  tree -> do
         hPutStrLn stderr "OK"
-        print tree
+        putStrLn $ compilellvm tree
 
 check :: String -> Err Program
 check source = do

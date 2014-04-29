@@ -1,8 +1,9 @@
 module CodeGenerator where
 
---import qualified Data.Map.Lazy as M
+import qualified Data.Map.Lazy as M
 import Control.Monad
 import Control.Monad.State
+import Data.List
 --import System.Environment (getArgs)
 --import System.Exit (exitFailure)
 
@@ -10,16 +11,44 @@ import Grammar.Abs
 import Grammar.Print
 import Grammar.ErrM
 
-compile :: String -> Program -> String
-compile name p = unlines $ reverse $ code $ execState (compileProgram name p) emptyEnv
+compilellvm :: Program -> String
+compilellvm p = unlines . reverse . code $ execState (compileProgram p) emptyEnv
 
-compileProgram :: String -> Program -> State Env ()
-compileProgram name (Program topDefs) = undefined
+compileProgram :: Program -> State Env ()
+compileProgram (Program topDefs) = do
+  mapM_ emit [
+    "declare void @printInt(i32)",
+    "declare void @printDouble(double)",
+    "declare void @printString(i8*)",
+    "declare i32 @readInt()",
+    "declare double @readDouble()"
+    ]
+  compileTopDefs topDefs
+  --emitStringLiterals
 
 compileTopDefs :: [TopDef] -> State Env ()
 compileTopDefs [] = return ()
-compileTopDefs defs@((FnDef t (Ident id) args block):rest) = undefined
-    
+compileTopDefs defs@((FnDef t (Ident id) args block):rest) = do
+  emit ""
+  emit $ "define " ++ makeLLVMType t ++ " @" ++ id ++ "(" ++ makeLLVMArgs args ++ ") {"
+  --compileBlock block
+  emit ""
+  emit "}"
+  compileTopDefs rest
+  where
+    makeLLVMArgs args = concat $ intersperse ", " (makeLLVMArgs' args)
+    makeLLVMArgs' ((Arg t (Ident id)):rest) = ((makeLLVMType t) ++ " %" ++ id):makeLLVMArgs' rest
+    makeLLVMArgs' [] = []
+
+makeLLVMType :: Type -> String
+makeLLVMType Int = "i32"
+makeLLVMType Doub = "double"
+makeLLVMType Bool = "i1"
+makeLLVMType Void = "void"
+
+compileBlock :: Block -> State Env ()
+compileBlock (Block stmts) = undefined
+
 compileStmt :: Stmt -> State Env ()
 compileStmt s = case s of
   Empty                     -> undefined
@@ -52,12 +81,52 @@ compileExpr e = case e of
   EAnd expr1 expr2       -> undefined
   EOr expr1 expr2        -> undefined
   ETyped expr typ        -> undefined
-      
 
+{-
 
- 
+(From slides)
+
+We need to keep some state information during code generation.
+This includes at least:
+
+* Next number for generating register names (and labels).
+* Definitions of global names for string literals.
+* Lookup table to find LLVM name for Javalette variable name.
+* Lookup table to find type of function.
+
+-}
+
+data Env = E {
+  code           :: [String],
+  currentExpType :: Type,
+
+  nextVariable   :: Int, -- getNextVariable :: State Env Int
+  nextLabel      :: Int,
+
+  stringLiterals :: [String],
+
+  llvmNames      :: M.Map Ident String,
+
+  functionTypes  :: M.Map Ident Type
+  }
+
+emptyEnv :: Env
+emptyEnv = E {
+  code = [],
+  currentExpType = undefined,
+  nextVariable = 0,
+  nextLabel = 0,
+  stringLiterals = [],
+  llvmNames = M.empty,
+  functionTypes = M.empty
+}
+
+emit :: String -> State Env ()
+emit s = modify (\env -> env{code = s : code env})
 
 --- Old state stuff for reference purpose ---
+
+{-
 
 data Env = E {
   addresses   :: [[(Ident,Address)]],
@@ -89,7 +158,7 @@ type Instruction = String
 type Address = Int
 
 
-{-
+
 emit :: Instruction -> State Env ()
 emit i = modify (\env -> env{code = i : code env})
 
