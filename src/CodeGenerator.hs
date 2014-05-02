@@ -124,6 +124,14 @@ emptyEnv = E {
 emit :: String -> State Env ()
 emit s = modify (\env -> env{code = s : code env})
 
+addVar :: Ident -> State Env String
+addVar x = do 
+  env <- get
+  let nextVar = show $ nextVariable env
+  modify (\env -> env { nextVariable = nextVariable env + 1 })
+  modify (\env -> env { llvmNames = M.insert x nextVar (llvmNames env) })
+  return nextVar
+
 --- Old state stuff for reference purpose ---
 
 {-
