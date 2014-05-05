@@ -59,14 +59,25 @@ compileTopDefs :: [TopDef] -> GenM ()
 compileTopDefs [] = return ()
 compileTopDefs (FnDef typ (Ident name) args block : rest) = do
   emit ""
-  emit $ "define " ++ makeLLVMType typ ++ " @" ++ name ++ "(" ++ llvmArgs ++ ") {"
-  compileBlock block
+  args' <- llvmArgs
+  emit $ "define " ++ makeLLVMType typ ++ " @" ++ name ++ "(" ++ args' ++ ") {"
+  
+
+  --compileBlock block
   emit "}"
   compileTopDefs rest
   where
-    llvmArgs = intercalate ", " (makeLLVMArgs args)
-    makeLLVMArgs (Arg t (Ident n) : xs) = (makeLLVMType t ++ " %" ++ n) : makeLLVMArgs xs
-    makeLLVMArgs [] = []
+    llvmArgs :: GenM String
+    llvmArgs = do
+      args' <- makeLLVMArgs args
+      return $ intercalate ", " (args')
+
+    makeLLVMArgs :: [Arg] -> GenM [String]
+    makeLLVMArgs (Arg t (Ident n) : xs) = do
+      newVar <- (addVar n)
+      rest <- makeLLVMArgs xs
+      return $ (makeLLVMType t ++ " %" ++ newVar) : rest
+    makeLLVMArgs [] = return []
 
 makeLLVMType :: Type -> String
 makeLLVMType Int = "i32"
@@ -80,10 +91,10 @@ compileBlock (Block stmts) = mapM_ compileStmt stmts
 compileStmt :: Stmt -> GenM ()
 compileStmt s = case s of
   Empty                     -> return ()
-  BStmt block               -> do
-    label <- createBlock
-    enterBlock label
-    compileBlock
+  BStmt block               -> undefined --do
+    --label <- createBlock
+    --enterBlock label
+    --compileBlock block
   Decl typ items            -> undefined
   Ass indent expr           -> undefined
   Incr ident                -> undefined
