@@ -4,7 +4,7 @@ module TypeChecker where
 
 import Control.Lens
 import Control.Monad
-import Control.Monad.Trans.State.Lazy
+import Control.Monad.State
 import Data.List
 import Data.Maybe
 import Grammar.Abs

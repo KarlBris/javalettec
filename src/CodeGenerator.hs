@@ -1,16 +1,47 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module CodeGenerator where
 
 import qualified Data.Map.Lazy as M
+import Control.Lens
 import Control.Monad.State
 import Data.List
 
 import Grammar.Abs
 import Grammar.ErrM
 
+type GenM a = StateT Env Err a
+
+data Env = Env {
+  _code           :: [String],
+  _currentExpType :: Type,
+
+  _nextVariable   :: Int, -- getNextVariable :: State Env Int
+  _nextLabel      :: Int,
+
+  _stringLiterals :: [String],
+
+  _llvmNames      :: M.Map String String -- TODO scoped
+} deriving Show
+
+emptyEnv :: Env
+emptyEnv = Env {
+  _code = [],
+  _currentExpType = undefined,
+
+  _nextVariable = 0,
+  _nextLabel = 0,
+
+  _llvmNames = M.empty,
+  _stringLiterals = []
+}
+
+makeLenses ''Env
+
 compilellvm :: Program -> Err String
 compilellvm p = do
   st <- execStateT (compileProgram p) emptyEnv
-  return $ unlines . reverse . code $ st 
+  return $ unlines . reverse . (^. code) $ st 
 
 compileProgram :: Program -> GenM ()
 compileProgram (Program topDefs) = do
@@ -29,8 +60,7 @@ compileTopDefs [] = return ()
 compileTopDefs (FnDef typ (Ident name) args block : rest) = do
   emit ""
   emit $ "define " ++ makeLLVMType typ ++ " @" ++ name ++ "(" ++ llvmArgs ++ ") {"
-  --compileBlock block
-  emit ""
+  compileBlock block
   emit "}"
   compileTopDefs rest
   where
@@ -44,13 +74,16 @@ makeLLVMType Doub = "double"
 makeLLVMType Bool = "i1"
 makeLLVMType Void = "void"
 
-compileBlock :: Block -> State Env ()
-compileBlock (Block stmts) = undefined
+compileBlock :: Block -> GenM ()
+compileBlock (Block stmts) = mapM_ compileStmt stmts
 
-compileStmt :: Stmt -> State Env ()
+compileStmt :: Stmt -> GenM ()
 compileStmt s = case s of
-  Empty                     -> undefined
-  BStmt block               -> undefined
+  Empty                     -> return ()
+  BStmt block               -> do
+    label <- createBlock
+    enterBlock label
+    compileBlock
   Decl typ items            -> undefined
   Ass indent expr           -> undefined
   Incr ident                -> undefined
@@ -62,7 +95,7 @@ compileStmt s = case s of
   While expr stmt           -> undefined
   SExp expr                 -> undefined
 
-compileExpr :: Expr -> State Env ()
+compileExpr :: Expr -> GenM ()
 compileExpr e = case e of
   EVar ident             -> undefined
   ELitInt integer        -> undefined
@@ -94,42 +127,15 @@ This includes at least:
 
 -}
 
-type GenM a = StateT Env Err a
-
-data Env = E {
-  code           :: [String],
-  currentExpType :: Type,
-
-  nextVariable   :: Int, -- getNextVariable :: State Env Int
-  nextLabel      :: Int,
-
-  stringLiterals :: [String],
-
-  llvmNames      :: M.Map String String -- TODO scoped
-  }
-
-emptyEnv :: Env
-emptyEnv = E {
-  code = [],
-  currentExpType = undefined,
-
-  nextVariable = 0,
-  nextLabel = 0,
-
-  llvmNames = M.empty,
-  stringLiterals = []
-}
-
 emit :: String -> GenM ()
-emit s = modify (\env -> env{code = s : code env})
+emit s = code %= (s:)
 
 addVar :: String -> GenM String
 addVar x = do 
-  env <- get
-  let nextVar = show $ nextVariable env
-  modify (\e -> e { nextVariable = nextVariable e + 1 })
-  modify (\e -> e { llvmNames = M.insert x nextVar (llvmNames e) }) -- TODO scoped
-  return nextVar
+  nextVar <- use nextVariable
+  nextVariable %= (+1)
+  llvmNames %= M.insert x (show nextVar) -- TODO scoped
+  return $ show nextVar
 
 translateVar :: String -> GenM String
 translateVar name = do
