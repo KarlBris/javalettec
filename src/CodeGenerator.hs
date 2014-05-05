@@ -5,11 +5,14 @@ import Control.Monad.State
 import Data.List
 
 import Grammar.Abs
+import Grammar.ErrM
 
-compilellvm :: Program -> String
-compilellvm p = unlines . reverse . code $ execState (compileProgram p) emptyEnv
+compilellvm :: Program -> Err String
+compilellvm p = do
+  st <- execStateT (compileProgram p) emptyEnv
+  return $ unlines . reverse . code $ st 
 
-compileProgram :: Program -> State Env ()
+compileProgram :: Program -> GenM ()
 compileProgram (Program topDefs) = do
   mapM_ emit [
     "declare void @printInt(i32)",
@@ -21,7 +24,7 @@ compileProgram (Program topDefs) = do
   compileTopDefs topDefs
   --emitStringLiterals
 
-compileTopDefs :: [TopDef] -> State Env ()
+compileTopDefs :: [TopDef] -> GenM ()
 compileTopDefs [] = return ()
 compileTopDefs (FnDef typ (Ident name) args block : rest) = do
   emit ""
@@ -91,6 +94,8 @@ This includes at least:
 
 -}
 
+type GenM a = StateT Env Err a
+
 data Env = E {
   code           :: [String],
   currentExpType :: Type,
@@ -100,32 +105,38 @@ data Env = E {
 
   stringLiterals :: [String],
 
-  llvmNames      :: M.Map Ident String,
-
-  functionTypes  :: M.Map Ident Type
+  llvmNames      :: M.Map String String -- TODO scoped
   }
 
 emptyEnv :: Env
 emptyEnv = E {
   code = [],
   currentExpType = undefined,
+
   nextVariable = 0,
   nextLabel = 0,
-  stringLiterals = [],
+
   llvmNames = M.empty,
-  functionTypes = M.empty
+  stringLiterals = []
 }
 
-emit :: String -> State Env ()
+emit :: String -> GenM ()
 emit s = modify (\env -> env{code = s : code env})
 
-addVar :: Ident -> State Env String
+addVar :: String -> GenM String
 addVar x = do 
   env <- get
   let nextVar = show $ nextVariable env
   modify (\e -> e { nextVariable = nextVariable e + 1 })
-  modify (\e -> e { llvmNames = M.insert x nextVar (llvmNames e) })
+  modify (\e -> e { llvmNames = M.insert x nextVar (llvmNames e) }) -- TODO scoped
   return nextVar
+
+translateVar :: String -> GenM String
+translateVar name = do
+  env <- get
+  -- todo
+  return "TODO"
+
 
 --- Old state stuff for reference purpose ---
 
