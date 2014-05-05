@@ -1,15 +1,10 @@
 module CodeGenerator where
 
 import qualified Data.Map.Lazy as M
-import Control.Monad
 import Control.Monad.State
 import Data.List
---import System.Environment (getArgs)
---import System.Exit (exitFailure)
 
 import Grammar.Abs
-import Grammar.Print
-import Grammar.ErrM
 
 compilellvm :: Program -> String
 compilellvm p = unlines . reverse . code $ execState (compileProgram p) emptyEnv
@@ -28,17 +23,17 @@ compileProgram (Program topDefs) = do
 
 compileTopDefs :: [TopDef] -> State Env ()
 compileTopDefs [] = return ()
-compileTopDefs defs@((FnDef t (Ident id) args block):rest) = do
+compileTopDefs (FnDef typ (Ident name) args block : rest) = do
   emit ""
-  emit $ "define " ++ makeLLVMType t ++ " @" ++ id ++ "(" ++ makeLLVMArgs args ++ ") {"
+  emit $ "define " ++ makeLLVMType typ ++ " @" ++ name ++ "(" ++ llvmArgs ++ ") {"
   --compileBlock block
   emit ""
   emit "}"
   compileTopDefs rest
   where
-    makeLLVMArgs args = concat $ intersperse ", " (makeLLVMArgs' args)
-    makeLLVMArgs' ((Arg t (Ident id)):rest) = ((makeLLVMType t) ++ " %" ++ id):makeLLVMArgs' rest
-    makeLLVMArgs' [] = []
+    llvmArgs = intercalate ", " (makeLLVMArgs args)
+    makeLLVMArgs (Arg t (Ident n) : xs) = (makeLLVMType t ++ " %" ++ n) : makeLLVMArgs xs
+    makeLLVMArgs [] = []
 
 makeLLVMType :: Type -> String
 makeLLVMType Int = "i32"
@@ -128,8 +123,8 @@ addVar :: Ident -> State Env String
 addVar x = do 
   env <- get
   let nextVar = show $ nextVariable env
-  modify (\env -> env { nextVariable = nextVariable env + 1 })
-  modify (\env -> env { llvmNames = M.insert x nextVar (llvmNames env) })
+  modify (\e -> e { nextVariable = nextVariable e + 1 })
+  modify (\e -> e { llvmNames = M.insert x nextVar (llvmNames e) })
   return nextVar
 
 --- Old state stuff for reference purpose ---

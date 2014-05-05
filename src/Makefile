@@ -1,7 +1,7 @@
 SOURCES = $(wildcard *.hs) Grammar/
 
 jlc: $(SOURCES)
-	ghc --make Compiler.hs -o jlc -odir build -hidir build
+	ghc -Wall --make Compiler.hs -o jlc -odir build -hidir build
 
 Grammar/: Grammar.cf
 	bnfc -d Grammar.cf
