@@ -48,7 +48,7 @@ compilellvm p = do
 
 compileProgram :: Program -> GenM ()
 compileProgram (Program topDefs) = do
-  mapM_ emit [
+  mapM_ emitLabel [
     "declare void @printInt(i32)",
     "declare void @printDouble(double)",
     "declare void @printString(i8*)",
@@ -65,14 +65,14 @@ compileTopDefs (FnDef typ (Ident name) args block : rest) = do
 
   scoped $ do
     args' <- llvmArgs
-    emit $ "define " ++ makeLLVMType typ ++ " @" ++ name ++ "(" ++ args' ++ ") {"
+    emitLabel $ "define " ++ makeLLVMType typ ++ " @" ++ name ++ "(" ++ args' ++ ") {"
 
     lbl <- newLabel
-    emit $ "entry: branch Label " ++ lbl
-    emit $ lbl ++ ":"
+    emitLabel $ "entry: branch Label " ++ lbl
+    emitLabel $ lbl ++ ":"
     compileBlock block
 
-    emit "}"
+    emitLabel "}"
 
   compileTopDefs rest
   where
@@ -113,7 +113,9 @@ compileStmt s = case s of
     ident' <- addVar ident
     let typ' = makeLLVMType typ
     emit $ "%" ++ ident' ++ " = alloca " ++ typ'
-    compileExpr ident' expr
+    ident'' <- newVar
+    compileExpr ident'' expr
+    store typ ident'' ident'
     compileStmt (Decl typ rest)
   Decl _ []                         -> do
     return ()
@@ -122,37 +124,78 @@ compileStmt s = case s of
     compileExpr ident' expr
   Incr ident                -> return ()
   Decr ident                -> return ()
-  Ret expr                  -> return ()
-  VRet                      -> return ()
+  Ret e@(ETyped _ typ)    -> do
+    ident <- newVar
+    compileExpr ident e
+    emit $ "ret " ++ makeLLVMType typ ++ " %" ++ ident
+  VRet                      -> do
+    emit "ret void"
   Cond expr stmt            -> return ()
   CondElse expr stmt1 stmt2 -> return ()
   While expr stmt           -> return ()
   SExp expr                 -> return ()
 
 compileExpr :: String -> Expr -> GenM ()
-compileExpr resultLoc e = case e of
+compileExpr resultReg e = case e of
   EVar (Ident ident)             -> do
-    ident' <- newVar
     typ <- getCurrentExpType
     var <- lookupVar ident
-    emit $ "%" ++ ident' ++ " = load " ++ makeLLVMType typ ++ "* " ++ var
-    store typ ident' resultLoc
-  ELitInt integer        -> return ()
-  ELitDoub double        -> return ()
-  ELitTrue               -> return ()
-  ELitFalse              -> return ()
-  EApp ident exprs       -> return ()
-  EString string         -> return ()
-  Neg expr               -> return ()
-  Not expr               -> return ()
-  EMul expr1 mulOp expr2 -> return ()
-  EAdd expr1 addOp expr2 -> return ()
-  ERel expr1 relOp expr2 -> return ()
-  EAnd expr1 expr2       -> return ()
-  EOr expr1 expr2        -> return ()
+    emit $ "%" ++ resultReg ++ " = load " ++ makeLLVMType typ ++ "* %" ++ var
+  ELitInt integer        -> do
+    ident <- newVar
+    emit $ "%" ++ ident ++ " = alloca i32"
+    emit $ "store i32 " ++ show integer ++ ", i32* %" ++ ident
+    emit $ "%" ++ resultReg ++ " = load i32* " ++ ident
+  ELitDoub double        -> do
+    ident <- newVar
+    emit $ "%" ++ ident ++ " = alloca double"
+    emit $ "store double " ++ show double ++ ", double* %" ++ ident
+    emit $ "%" ++ resultReg ++ " = load double* " ++ ident
+  ELitTrue               -> do
+    ident <- newVar
+    emit $ "%" ++ ident ++ " = alloca i1"
+    emit $ "store i1 true, i1* %" ++ ident
+    emit $ "%" ++ resultReg ++ " = load i1 " ++ ident
+  ELitFalse              -> do
+    ident <- newVar
+    emit $ "%" ++ ident ++ " = alloca i1"
+    emit $ "store i1 false, i1* %" ++ ident
+    emit $ "%" ++ resultReg ++ " = load i1 " ++ ident
+  EApp ident exprs       -> emit "; Function call"
+  EString string         -> return () --addStringLiterals and such
+  Neg expr               -> emit "; Negation"
+  Not expr               -> emit "; Not"
+  EMul expr1 mulOp expr2 -> do
+    typ <- getCurrentExpType
+    ident1 <- newVar
+    ident2 <- newVar
+    compileExpr ident1 expr1
+    compileExpr ident2 expr2
+    emit $ "%" ++ resultReg ++ " = " ++ getMulOp typ mulOp ++ " " ++ makeLLVMType typ ++ " %" ++ ident1 ++ ", %" ++ ident2
+  EAdd expr1 addOp expr2 -> emit "; Addition"
+  ERel expr1 relOp expr2 -> emit "; Rel operation"
+  EAnd expr1 expr2       -> emit "; And"
+  EOr expr1 expr2        -> emit "; Or"
   ETyped expr typ        -> do
     setCurrentExpType typ
-    compileExpr resultLoc expr
+    compileExpr resultReg expr
+
+getMulOp :: Type -> MulOp -> String
+getMulOp Int Times    = "mul"
+getMulOp Int Div      = "sdiv"
+getMulOp Int Mod      = "srem"
+getMulOp Doub Times = "fmul"
+getMulOp Doub Div   = "fdiv"
+getMulOp Doub Mod   = "rem"
+
+getAddOp :: Type -> AddOp -> String
+getAddOp Int Plus     = "add"
+getAddOp Int Minus    = "sub"
+getAddOp Doub Plus  = "fadd"
+getAddOp Doub Minus = "fsub"
+
+getRelOp :: Type -> RelOp -> String
+getRelOp t r = undefined
 
 {-
 
@@ -174,7 +217,10 @@ store typ src tgt = do
   emit $ "store " ++ typ' ++ " %" ++ src ++ ", " ++ typ' ++ "* %" ++ tgt
 
 emit :: String -> GenM ()
-emit s = code %= (s:)
+emit s = emitLabel $ "  " ++ s
+
+emitLabel :: String -> GenM ()
+emitLabel s = code %= (s:)
 
 addVar :: String -> GenM String
 addVar x = do 
