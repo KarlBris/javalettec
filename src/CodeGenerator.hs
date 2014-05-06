@@ -14,26 +14,29 @@ type GenM a = StateT Env Err a
 
 data Env = Env {
   _code           :: [String],
-  _currentExpType :: Type,
+  _currentExpType :: Maybe Type,
 
-  _nextVariable   :: Int, -- getNextVariable :: State Env Int
+  _nextVariable   :: Int,
   _nextLabel      :: Int,
+  _nextString     :: Int,
 
   _stringLiterals :: [String],
-
-  _llvmNames      :: M.Map String String -- TODO scoped
+  _llvmNames      :: [M.Map String String],
+  _continueTo     :: [String]
 } deriving Show
 
 emptyEnv :: Env
 emptyEnv = Env {
   _code = [],
-  _currentExpType = undefined,
+  _currentExpType = Nothing,
 
   _nextVariable = 0,
   _nextLabel = 0,
+  _nextString = 0,
 
-  _llvmNames = M.empty,
-  _stringLiterals = []
+  _stringLiterals = [],
+  _llvmNames = [],
+  _continueTo = []
 }
 
 makeLenses ''Env
@@ -59,12 +62,18 @@ compileTopDefs :: [TopDef] -> GenM ()
 compileTopDefs [] = return ()
 compileTopDefs (FnDef typ (Ident name) args block : rest) = do
   emit ""
-  args' <- llvmArgs
-  emit $ "define " ++ makeLLVMType typ ++ " @" ++ name ++ "(" ++ args' ++ ") {"
-  
 
-  compileBlock block
-  emit "}"
+  scoped $ do
+    args' <- llvmArgs
+    emit $ "define " ++ makeLLVMType typ ++ " @" ++ name ++ "(" ++ args' ++ ") {"
+
+    lbl <- newLabel
+    emit $ "entry: branch Label " ++ lbl
+    emit $ lbl ++ ":"
+    compileBlock block
+
+    emit "}"
+
   compileTopDefs rest
   where
     llvmArgs :: GenM String
@@ -86,15 +95,14 @@ makeLLVMType Bool = "i1"
 makeLLVMType Void = "void"
 
 compileBlock :: Block -> GenM ()
-compileBlock (Block stmts) = mapM_ compileStmt stmts
+compileBlock (Block stmts) = do
+  scoped $ mapM_ compileStmt stmts
 
 compileStmt :: Stmt -> GenM ()
 compileStmt s = case s of
   Empty                     -> return ()
   BStmt block               -> do
-    --label <- createBlock
-    --enterBlock label
-    compileBlock block
+    scoped $ compileBlock block
   Decl typ ((NoInit (Ident ident)):rest)    -> do
     ident' <- addVar ident
     let typ' = makeLLVMType typ
@@ -170,40 +178,59 @@ emit s = code %= (s:)
 
 addVar :: String -> GenM String
 addVar x = do 
-  nextVar <- use nextVariable
-  nextVariable %= (+1)
-  llvmNames %= M.insert x (show nextVar) -- TODO scoped
-  return $ show nextVar
+  num <- use nextVariable
+  nextVariable += 1
+  llvmNames %= \(s:ss) -> M.insert x (show num) s : ss
+  return $ show num
 
 newVar :: GenM String
 newVar = do
-  nextVar <- use nextVariable
-  nextVariable %= (+1)
-  return $ show nextVar
+  num <- use nextVariable
+  nextVariable += 1
+  return $ show num
 
 lookupVar :: String -> GenM String
-lookupVar s = do
-  table <- use llvmNames
-  let res = M.lookup s table
-  case res of
-    Nothing -> fail $ "CRITICAL ERROR: Variable " ++ s ++ "not found in map"
-    Just r -> return r
+lookupVar name = do
+  scopes <- use llvmNames
+  lookIn scopes
+  where
+    lookIn [] = fail $ "CRITICAL ERROR: Variable " ++ name ++ " not reachable"
+    lookIn (scope:ss) = case M.lookup name scope of
+      Nothing -> lookIn ss
+      Just newName -> return newName
+
+newLabel :: GenM String
+newLabel = do
+  num <- use nextLabel
+  nextLabel += 1
+  return $ show num
+
+withContinueLabel :: String -> GenM a -> GenM a
+withContinueLabel name fn = do
+  continueTo %= (name:)
+  value <- fn
+  continueTo %= tail
+  return value
 
 setCurrentExpType :: Type -> GenM ()
 setCurrentExpType typ = do
-  currentExpType .= typ
+  currentExpType .= Just typ
 
 getCurrentExpType :: GenM Type
 getCurrentExpType = do
   expType <- use currentExpType
-  return expType
+  case expType of
+    Nothing -> fail $ "CRITICAL ERROR: currentExpType not set"
+    Just x  -> return x
 
-translateVar :: String -> GenM String
-translateVar name = do
-  env <- get
-  -- todo
-  return "TODO"
+enterScope :: GenM ()
+enterScope = llvmNames %= (M.empty:)
 
+exitScope :: GenM ()
+exitScope = llvmNames %= tail
+
+scoped :: GenM a -> GenM ()
+scoped fn = enterScope >> fn >> exitScope
 
 --- Old state stuff for reference purpose ---
 
