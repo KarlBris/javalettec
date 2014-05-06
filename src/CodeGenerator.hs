@@ -63,7 +63,7 @@ compileTopDefs (FnDef typ (Ident name) args block : rest) = do
   emit $ "define " ++ makeLLVMType typ ++ " @" ++ name ++ "(" ++ args' ++ ") {"
   
 
-  --compileBlock block
+  compileBlock block
   emit "}"
   compileTopDefs rest
   where
@@ -91,38 +91,60 @@ compileBlock (Block stmts) = mapM_ compileStmt stmts
 compileStmt :: Stmt -> GenM ()
 compileStmt s = case s of
   Empty                     -> return ()
-  BStmt block               -> undefined --do
+  BStmt block               -> do
     --label <- createBlock
     --enterBlock label
-    --compileBlock block
-  Decl typ items            -> undefined
-  Ass indent expr           -> undefined
-  Incr ident                -> undefined
-  Decr ident                -> undefined
-  Ret expr                  -> undefined
-  VRet                      -> undefined
-  Cond expr stmt            -> undefined
-  CondElse expr stmt1 stmt2 -> undefined
-  While expr stmt           -> undefined
-  SExp expr                 -> undefined
+    compileBlock block
+  Decl typ ((NoInit (Ident ident)):rest)    -> do
+    ident' <- addVar ident
+    let typ' = makeLLVMType typ
+    emit $ "%" ++ ident' ++ " = alloca " ++ typ'
+    emit $ "store " ++ typ' ++ " 0, " ++ typ' ++ "* %" ++ ident'
+    compileStmt (Decl typ rest)
+  Decl typ ((Init (Ident ident) expr):rest) -> do
+    ident' <- addVar ident
+    let typ' = makeLLVMType typ
+    emit $ "%" ++ ident' ++ " = alloca " ++ typ'
+    compileExpr ident' expr
+    compileStmt (Decl typ rest)
+  Decl _ []                         -> do
+    return ()
+  Ass (Ident ident) expr            -> do
+    ident' <- lookupVar ident
+    compileExpr ident' expr
+  Incr ident                -> return ()
+  Decr ident                -> return ()
+  Ret expr                  -> return ()
+  VRet                      -> return ()
+  Cond expr stmt            -> return ()
+  CondElse expr stmt1 stmt2 -> return ()
+  While expr stmt           -> return ()
+  SExp expr                 -> return ()
 
-compileExpr :: Expr -> GenM ()
-compileExpr e = case e of
-  EVar ident             -> undefined
-  ELitInt integer        -> undefined
-  ELitDoub double        -> undefined
-  ELitTrue               -> undefined
-  ELitFalse              -> undefined
-  EApp ident exprs       -> undefined
-  EString string         -> undefined
-  Neg expr               -> undefined
-  Not expr               -> undefined
-  EMul expr1 mulOp expr2 -> undefined
-  EAdd expr1 addOp expr2 -> undefined
-  ERel expr1 relOp expr2 -> undefined
-  EAnd expr1 expr2       -> undefined
-  EOr expr1 expr2        -> undefined
-  ETyped expr typ        -> undefined
+compileExpr :: String -> Expr -> GenM ()
+compileExpr resultLoc e = case e of
+  EVar (Ident ident)             -> do
+    ident' <- newVar
+    typ <- getCurrentExpType
+    var <- lookupVar ident
+    emit $ "%" ++ ident' ++ " = load " ++ makeLLVMType typ ++ "* " ++ var
+    store typ ident' resultLoc
+  ELitInt integer        -> return ()
+  ELitDoub double        -> return ()
+  ELitTrue               -> return ()
+  ELitFalse              -> return ()
+  EApp ident exprs       -> return ()
+  EString string         -> return ()
+  Neg expr               -> return ()
+  Not expr               -> return ()
+  EMul expr1 mulOp expr2 -> return ()
+  EAdd expr1 addOp expr2 -> return ()
+  ERel expr1 relOp expr2 -> return ()
+  EAnd expr1 expr2       -> return ()
+  EOr expr1 expr2        -> return ()
+  ETyped expr typ        -> do
+    setCurrentExpType typ
+    compileExpr resultLoc expr
 
 {-
 
@@ -138,6 +160,11 @@ This includes at least:
 
 -}
 
+store :: Type -> String -> String -> GenM ()
+store typ src tgt = do
+  let typ' = makeLLVMType typ
+  emit $ "store " ++ typ' ++ " %" ++ src ++ ", " ++ typ' ++ "* %" ++ tgt
+
 emit :: String -> GenM ()
 emit s = code %= (s:)
 
@@ -147,6 +174,29 @@ addVar x = do
   nextVariable %= (+1)
   llvmNames %= M.insert x (show nextVar) -- TODO scoped
   return $ show nextVar
+
+newVar :: GenM String
+newVar = do
+  nextVar <- use nextVariable
+  nextVariable %= (+1)
+  return $ show nextVar
+
+lookupVar :: String -> GenM String
+lookupVar s = do
+  table <- use llvmNames
+  let res = M.lookup s table
+  case res of
+    Nothing -> fail $ "CRITICAL ERROR: Variable " ++ s ++ "not found in map"
+    Just r -> return r
+
+setCurrentExpType :: Type -> GenM ()
+setCurrentExpType typ = do
+  currentExpType .= typ
+
+getCurrentExpType :: GenM Type
+getCurrentExpType = do
+  expType <- use currentExpType
+  return expType
 
 translateVar :: String -> GenM String
 translateVar name = do
