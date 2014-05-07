@@ -83,9 +83,9 @@ checkStmt Empty = return Empty
 
 checkStmt (BStmt block) = do
   enterScope
-  block' <- checkBlock block
+  typedBlock <- checkBlock block
   exitScope
-  return (BStmt block)
+  return (BStmt typedBlock)
 
 checkStmt (Decl t items) = do
   items' <- mapM (checkItem t) items
@@ -160,7 +160,7 @@ checkStmt (While expr stmt) = do
   didReturn <- use fnReturned -- save current value of fnReturned
   fnReturned .= False
 
-  expr'@(ETyped _ t) <- inferExpr expr
+  typedExpr@(ETyped _ t) <- inferExpr expr
   assert (t == Bool) $
       "Non-bool condition (" ++
       show t ++
@@ -169,9 +169,9 @@ checkStmt (While expr stmt) = do
   stmt' <- checkStmt stmt
 
   didReturn' <- use fnReturned
-  (fnReturned .=) $ didReturn || (didReturn' && isLiterallyTrue expr')
+  (fnReturned .=) $ didReturn || (didReturn' && isLiterallyTrue typedExpr)
   
-  return (While expr' stmt')
+  return (While typedExpr stmt')
 
 checkStmt (SExp expr) = do
   expr' <- inferExpr expr
