@@ -126,8 +126,9 @@ compileStmt s = case s of
   Decl _ []                         -> do
     return ()
   Ass (Ident ident) expr            -> do
-    ident' <- lookupVar ident
-    compileExpr ident' expr
+    setReg <- newVar
+    compileExpr setReg expr
+    setVar ident setReg
   Incr ident                -> return ()
   Decr ident                -> return ()
   Ret e@(ETyped _ typ)    -> do
@@ -254,7 +255,7 @@ compileExpr resultReg e = case e of
   EString string         -> do --emit "; String literal goes here" --addStringLiterals and such
     stringVar <- newVar
     length <- addStringLiteral stringVar string
-    emit $ "%" ++ resultReg ++ " = bitcast [" ++ show length ++ "x i8*]" ++ "* @" ++ stringVar ++ " to i8*"
+    emit $ "%" ++ resultReg ++ " = bitcast [" ++ show length ++ " x i8]* @" ++ stringVar ++ " to i8*"
   Neg expr               -> do
     typ <- getCurrentExpType
     let op = case typ of Int  -> "sub"
@@ -376,6 +377,10 @@ newVar = do
   nextVariable += 1
   return $ "var" ++ show num
 
+setVar :: String -> String -> GenM ()
+setVar ident reg = do
+  llvmNames %= \(s:ss) -> M.insert ident reg s : ss
+
 lookupVar :: String -> GenM String
 lookupVar name = do
   scopes <- use llvmNames
@@ -463,8 +468,8 @@ emptyContStack = do
 addStringLiteral :: String -> String -> GenM Int
 addStringLiteral stringVar string = do
   let escapedString = string ++ "\\0A\\00"
-  let newLength = length escapedString
-  let globalString = "@" ++ stringVar ++ " = internal constant [" ++ show newLength ++ ", i8] c\"" ++ escapedString ++ "\""
+  let newLength = length string + 2
+  let globalString = "@" ++ stringVar ++ " = internal constant [" ++ show newLength ++ " x i8] c\"" ++ escapedString ++ "\""
   stringLiterals %= (globalString:)
   return newLength
 
