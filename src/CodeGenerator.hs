@@ -22,7 +22,8 @@ data Env = Env {
 
   _stringLiterals :: [String],
   _llvmNames      :: [M.Map String String],
-  _continueTo     :: [String]
+  _contStack      :: [String],
+  _lastStmtStack  :: [Bool]
 } deriving Show
 
 emptyEnv :: Env
@@ -36,7 +37,8 @@ emptyEnv = Env {
 
   _stringLiterals = [],
   _llvmNames = [],
-  _continueTo = []
+  _contStack = [],
+  _lastStmtStack = []
 }
 
 makeLenses ''Env
@@ -68,7 +70,7 @@ compileTopDefs (FnDef typ (Ident name) args block : rest) = do
     emitLabel $ "define " ++ makeLLVMType typ ++ " @" ++ name ++ "(" ++ args' ++ ") {"
 
     lbl <- newLabel
-    emitLabel $ "entry: branch Label " ++ lbl
+    emitLabel $ "entry: br label %" ++ lbl
     emitLabel $ lbl ++ ":"
     compileBlock block
 
@@ -96,13 +98,15 @@ makeLLVMType Void = "void"
 
 compileBlock :: Block -> GenM ()
 compileBlock (Block stmts) = do
-  scoped $ mapM_ compileStmt stmts
+  scoped $ forM_ stmts $ \stmt -> if stmt == (last stmts)
+    then withLastStmt stmt
+    else withInitStmt stmt
 
 compileStmt :: Stmt -> GenM ()
 compileStmt s = case s of
-  Empty                     -> return ()
+  Empty                     -> fail "You're in luck, you got an empty stmt!"
   BStmt block               -> do
-    scoped $ compileBlock block
+    compileBlock block
   Decl typ ((NoInit (Ident ident)):rest)    -> do
     ident' <- addVar ident
     let typ' = makeLLVMType typ
@@ -128,12 +132,83 @@ compileStmt s = case s of
     ident <- newVar
     compileExpr ident e
     emit $ "ret " ++ makeLLVMType typ ++ " %" ++ ident
-  VRet                      -> do
+  Ret (ELitInt x) -> do
+    emit $ "ret " ++ makeLLVMType Int ++ " " ++ show x
+  Ret (ELitDoub x) -> do
+    emit $ "ret " ++ makeLLVMType Doub ++ " " ++ show x
+  Ret ELitTrue -> do
+    emit $ "ret " ++ makeLLVMType Bool ++ " 1"
+  Ret ELitFalse -> do
+    emit $ "ret " ++ makeLLVMType Bool ++ " 0"
+  VRet -> do
     emit "ret void"
-  Cond expr stmt            -> return ()
-  CondElse expr stmt1 stmt2 -> return ()
-  While expr stmt           -> return ()
-  SExp expr                 -> return ()
+  Cond expr stmt -> do
+    condLbl <- newLabel
+    nextLbl <- newLabel
+    condReg <- newVar
+
+    compileExpr condReg expr
+    emit $ "br i1 %" ++ condReg ++ ", label %" ++ condLbl ++ ", label %" ++ nextLbl
+    emitLabel $ condLbl ++ ":"
+    scoped $ compileStmt stmt
+    emit $ "br label %" ++ nextLbl
+
+    emitLabel $ nextLbl ++ ":"
+    gameOver <- atEnd
+    if gameOver
+      then emit "unreachable"
+      else return ()
+  CondElse expr stmt1 stmt2 -> do
+    lblIf <- newLabel
+    lblElse <- newLabel
+    nextLbl <- newLabel
+    condReg <- newVar
+
+    compileExpr condReg expr
+    emit $ "br i1 %" ++ condReg ++ ", label %" ++ lblIf ++ ", label %" ++ lblElse
+    emitLabel $ lblIf ++ ":"
+    scoped $ compileStmt stmt1
+    emit $ "br label %" ++ nextLbl
+
+    emitLabel $ lblElse ++ ":"
+    scoped $ compileStmt stmt2
+    emit $ "br label %" ++ nextLbl
+
+    emitLabel $ nextLbl ++ ":"
+    gameOver <- atEnd
+    if gameOver
+      then emit "unreachable"
+      else return ()
+
+  While expr stmt -> do
+    lblBegin <- newLabel
+    lblLoop <- newLabel
+    lblNext <- newLabel
+    condReg <- newVar
+
+    emitLabel $ lblBegin ++ ":"
+    enterScope
+    compileExpr condReg expr
+    emit $ "br i1 %" ++ condReg ++ ", label %" ++ lblLoop ++ ", label %" ++ lblNext
+    emitLabel $ lblLoop ++ ":"
+    scoped $ compileStmt stmt
+    emit $ "br label %" ++ lblBegin
+    exitScope
+
+    emitLabel $ lblNext ++ ":"
+    gameOver <- atEnd
+    if gameOver
+      then emit "unreachable"
+      else return ()
+
+  SExp expr -> do
+    case expr of
+      ETyped app@(EApp _ _) _ -> do
+        resReg <- newVar
+        compileExpr resReg app
+      _ -> return ()
+
+  stmt -> fail $ "CRITICAL ERROR: Unexpected stmt " ++ show stmt
 
 compileExpr :: String -> Expr -> GenM ()
 compileExpr resultReg e = case e of
@@ -155,12 +230,12 @@ compileExpr resultReg e = case e of
     ident <- newVar
     emit $ "%" ++ ident ++ " = alloca i1"
     emit $ "store i1 true, i1* %" ++ ident
-    emit $ "%" ++ resultReg ++ " = load i1 " ++ ident
+    emit $ "%" ++ resultReg ++ " = load i1* %" ++ ident
   ELitFalse              -> do
     ident <- newVar
     emit $ "%" ++ ident ++ " = alloca i1"
     emit $ "store i1 false, i1* %" ++ ident
-    emit $ "%" ++ resultReg ++ " = load i1 " ++ ident
+    emit $ "%" ++ resultReg ++ " = load i1* %" ++ ident
   EApp ident exprs       -> emit "; Function call"
   EString string         -> return () --addStringLiterals and such
   Neg expr               -> emit "; Negation"
@@ -224,16 +299,15 @@ emitLabel s = code %= (s:)
 
 addVar :: String -> GenM String
 addVar x = do 
-  num <- use nextVariable
-  nextVariable += 1
-  llvmNames %= \(s:ss) -> M.insert x (show num) s : ss
-  return $ show num
+  var <- newVar
+  llvmNames %= \(s:ss) -> M.insert x var s : ss
+  return var
 
 newVar :: GenM String
 newVar = do
   num <- use nextVariable
   nextVariable += 1
-  return $ show num
+  return $ "var" ++ show num
 
 lookupVar :: String -> GenM String
 lookupVar name = do
@@ -249,14 +323,21 @@ newLabel :: GenM String
 newLabel = do
   num <- use nextLabel
   nextLabel += 1
-  return $ show num
+  return $ "lbl" ++ show num
 
 withContinueLabel :: String -> GenM a -> GenM a
 withContinueLabel name fn = do
-  continueTo %= (name:)
+  contStack %= (name:)
   value <- fn
-  continueTo %= tail
+  contStack %= tail
   return value
+
+continueTo :: GenM String
+continueTo = do
+  stack <- use contStack
+  case stack of
+    (x:_) -> return x
+    []    -> fail "CRITICAL ERROR: continueTo with empty continue stack"
 
 setCurrentExpType :: Type -> GenM ()
 setCurrentExpType typ = do
@@ -275,8 +356,41 @@ enterScope = llvmNames %= (M.empty:)
 exitScope :: GenM ()
 exitScope = llvmNames %= tail
 
-scoped :: GenM a -> GenM ()
-scoped fn = enterScope >> fn >> exitScope
+scoped :: GenM a -> GenM a
+scoped fn = do
+  enterScope
+  value <- fn
+  exitScope
+  return value
+
+withLastStmt :: Stmt -> GenM ()
+withLastStmt stmt = do
+  lastStmtStack %= (True:)
+  value <- compileStmt stmt
+  lastStmtStack %= tail
+  return value
+
+withInitStmt :: Stmt -> GenM ()
+withInitStmt stmt = do
+  lastStmtStack %= (False:)
+  value <- compileStmt stmt
+  lastStmtStack %= tail
+  return value
+
+atEnd :: GenM Bool
+atEnd = do
+  st <- use lastStmtStack
+  end <- emptyContStack
+  case st of
+    [] -> fail "CRITICAL ERROR: Empty lastStmtStack"
+    (x:_) -> return (x && end)
+
+emptyContStack :: GenM Bool
+emptyContStack = do
+  st <- use contStack
+  case st of
+    [] -> return True
+    _  -> return False
 
 --- Old state stuff for reference purpose ---
 

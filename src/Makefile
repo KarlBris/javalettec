@@ -11,9 +11,21 @@ Grammar/: Grammar.cf
 	happy -gca Grammar/Par.y
 	rm Grammar/*.bak
 
-.PHONY: clean distclean
+# Usage: make test FILE=../tests/testsuite/good/core021.jl
+test: jlc
+	@rm -rf tmp/
+	@mkdir tmp
+	@echo "######### ${FILE}\n"
+	@cat ${FILE} && \
+	./jlc ${FILE} > tmp/test.llvm && \
+	echo "\n\n######### tmp/test.llvm\n" && cat tmp/test.llvm && \
+	opt -std-compile-opts -mem2reg tmp/test.llvm > tmp/test.bc && \
+  llvm-dis tmp/test.bc && echo "\n\n######### tmp/test.ll\n" && cat tmp/test.ll
+
+.PHONY: clean distclean test
 clean:
 	-rm -rf build
 	-rm -f jlc
+	-rm -rf tmp
 distclean: clean
 	
