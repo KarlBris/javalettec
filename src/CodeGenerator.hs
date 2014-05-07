@@ -161,10 +161,29 @@ compileExpr resultReg e = case e of
     emit $ "%" ++ ident ++ " = alloca i1"
     emit $ "store i1 false, i1* %" ++ ident
     emit $ "%" ++ resultReg ++ " = load i1 " ++ ident
-  EApp ident exprs       -> emit "; Function call"
-  EString string         -> return () --addStringLiterals and such
-  Neg expr               -> emit "; Negation"
-  Not expr               -> emit "; Not"
+  EApp (Ident ident) exprs       -> do
+    typ <- getCurrentExpType
+    emit $ "; stuff goes here"
+    emit $ "; ..."
+    let argumentList = "<ARGUMENT_LIST>"
+    --argumentList <- compileAndListifyArguments exprs
+    let prefix = case typ of Void -> ""
+                             _    -> "%" ++ resultReg ++ " = "
+    emit $ prefix ++ "call " ++ makeLLVMType typ ++ " @" ++ ident ++ "(" ++ argumentList ++ ")"
+  EString string         -> emit "; String literal goes here" --addStringLiterals and such
+  Neg expr               -> do
+    typ <- getCurrentExpType
+    let op = case typ of Int  -> "sub"
+                         Doub -> "fsub"
+    let zero = case typ of Int  -> "0"
+                           Doub -> "0.0"
+    ident <- newVar
+    compileExpr ident expr
+    emit $ "%" ++ resultReg ++ " = " ++ op ++ " " ++ makeLLVMType typ ++ " " ++ zero ++ ", %" ++ ident
+  Not expr               -> do
+    ident <- newVar
+    compileExpr ident expr
+    emit $ "%" ++ resultReg ++ " = xor i1 %" ++ ident ++ ", %" ++ ident
   EMul expr1 mulOp expr2 -> do
     typ <- getCurrentExpType
     ident1 <- newVar
@@ -172,30 +191,64 @@ compileExpr resultReg e = case e of
     compileExpr ident1 expr1
     compileExpr ident2 expr2
     emit $ "%" ++ resultReg ++ " = " ++ getMulOp typ mulOp ++ " " ++ makeLLVMType typ ++ " %" ++ ident1 ++ ", %" ++ ident2
-  EAdd expr1 addOp expr2 -> emit "; Addition"
-  ERel expr1 relOp expr2 -> emit "; Rel operation"
-  EAnd expr1 expr2       -> emit "; And"
-  EOr expr1 expr2        -> emit "; Or"
+  EAdd expr1 addOp expr2 -> do
+    typ <- getCurrentExpType
+    ident1 <- newVar
+    ident2 <- newVar
+    compileExpr ident1 expr1
+    compileExpr ident2 expr2
+    emit $ "%" ++ resultReg ++ " = " ++ getAddOp typ addOp ++ " " ++ makeLLVMType typ ++ " %" ++ ident1 ++ ", %" ++ ident2
+  ERel expr1 relOp expr2 -> do -- this might do some weird shit, since the type returned by getCurrentExpType probably is Bool here
+    typ <- getCurrentExpType
+    ident1 <- newVar
+    ident2 <- newVar
+    compileExpr ident1 expr1
+    compileExpr ident2 expr2
+    emit $ "%" ++ resultReg ++ " = " ++ getRelOp typ relOp ++ " " ++ makeLLVMType typ ++ " %" ++ ident1 ++ ", %" ++ ident2
+  EAnd expr1 expr2       -> do
+    ident1 <- newVar
+    ident2 <- newVar
+    compileExpr ident1 expr1
+    compileExpr ident2 expr2
+    emit $ "%" ++ resultReg ++ " = and i1 %" ++ ident1 ++ ", %" ++ ident2
+  EOr expr1 expr2        -> do
+    ident1 <- newVar
+    ident2 <- newVar
+    compileExpr ident1 expr1
+    compileExpr ident2 expr2
+    emit $ "%" ++ resultReg ++ " = or i1 %" ++ ident1 ++ ", %" ++ ident2
   ETyped expr typ        -> do
     setCurrentExpType typ
     compileExpr resultReg expr
 
 getMulOp :: Type -> MulOp -> String
-getMulOp Int Times    = "mul"
-getMulOp Int Div      = "sdiv"
-getMulOp Int Mod      = "srem"
+getMulOp Int Times  = "mul"
+getMulOp Int Div    = "sdiv"
+getMulOp Int Mod    = "srem"
 getMulOp Doub Times = "fmul"
 getMulOp Doub Div   = "fdiv"
 getMulOp Doub Mod   = "rem"
 
 getAddOp :: Type -> AddOp -> String
-getAddOp Int Plus     = "add"
-getAddOp Int Minus    = "sub"
+getAddOp Int Plus   = "add"
+getAddOp Int Minus  = "sub"
 getAddOp Doub Plus  = "fadd"
 getAddOp Doub Minus = "fsub"
 
 getRelOp :: Type -> RelOp -> String
-getRelOp t r = undefined
+getRelOp Int LTH  = "icmp slt" 
+getRelOp Int LE   = "icmp sle"
+getRelOp Int GTH  = "icmp sgt"
+getRelOp Int GE   = "icmp sge"
+getRelOp Int EQU  = "icmp eq"
+getRelOp Int NE   = "icmp ne"
+getRelOp Doub LTH = "fcmp ult" 
+getRelOp Doub LE  = "fcmp ule"
+getRelOp Doub GTH = "fcmp ugt"
+getRelOp Doub GE  = "fcmp uge"
+getRelOp Doub EQU = "fcmp ueq"
+getRelOp Doub NE  = "fcmp une"
+
 
 {-
 
