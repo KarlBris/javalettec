@@ -51,6 +51,7 @@ compilellvm p = do
 compileProgram :: Program -> GenM ()
 compileProgram (Program topDefs) = do
   mapM_ emitLabel [
+    "",
     "declare void @printInt(i32)",
     "declare void @printDouble(double)",
     "declare void @printString(i8*)",
@@ -58,7 +59,7 @@ compileProgram (Program topDefs) = do
     "declare double @readDouble()"
     ]
   compileTopDefs topDefs
-  --emitStringLiterals
+  emitStringLiterals
 
 compileTopDefs :: [TopDef] -> GenM ()
 compileTopDefs [] = return ()
@@ -91,10 +92,11 @@ compileTopDefs (FnDef typ (Ident name) args block : rest) = do
     makeLLVMArgs [] = return []
 
 makeLLVMType :: Type -> String
-makeLLVMType Int = "i32"
-makeLLVMType Doub = "double"
-makeLLVMType Bool = "i1"
-makeLLVMType Void = "void"
+makeLLVMType Int    = "i32"
+makeLLVMType Doub   = "double"
+makeLLVMType Bool   = "i1"
+makeLLVMType Void   = "void"
+makeLLVMType String = "i8*"
 
 compileBlock :: Block -> GenM ()
 compileBlock (Block stmts) = do
@@ -240,14 +242,19 @@ compileExpr resultReg e = case e of
     emit $ "%" ++ resultReg ++ " = load i1* %" ++ ident
   EApp (Ident ident) exprs       -> do
     typ <- getCurrentExpType
-    emit $ "; stuff goes here"
-    emit $ "; ..."
-    let argumentList = "<ARGUMENT_LIST>"
-    --argumentList <- compileAndListifyArguments exprs
+    let l = length exprs
+    regs <- sequence (replicate l newVar)
+    let exprPairs = zip regs exprs
+    mapM_ (uncurry compileExpr) exprPairs
+    let typePairs = zip regs (map (\(ETyped _ t) -> makeLLVMType t) exprs)
+    let argumentList = intercalate ", " (map (\(reg, typ) -> typ ++ " %" ++ reg) typePairs)
     let prefix = case typ of Void -> ""
                              _    -> "%" ++ resultReg ++ " = "
     emit $ prefix ++ "call " ++ makeLLVMType typ ++ " @" ++ ident ++ "(" ++ argumentList ++ ")"
-  EString string         -> emit "; String literal goes here" --addStringLiterals and such
+  EString string         -> do --emit "; String literal goes here" --addStringLiterals and such
+    stringVar <- newVar
+    length <- addStringLiteral stringVar string
+    emit $ "%" ++ resultReg ++ " = bitcast [" ++ show length ++ "x i8*]" ++ "* @" ++ stringVar ++ " to i8*"
   Neg expr               -> do
     typ <- getCurrentExpType
     let op = case typ of Int  -> "sub"
@@ -275,7 +282,7 @@ compileExpr resultReg e = case e of
     compileExpr ident1 expr1
     compileExpr ident2 expr2
     emit $ "%" ++ resultReg ++ " = " ++ getAddOp typ addOp ++ " " ++ makeLLVMType typ ++ " %" ++ ident1 ++ ", %" ++ ident2
-  ERel expr1@(ETyped _ typ) relOp expr2 -> do -- this might do some weird shit, since the type returned by getCurrentExpType probably is Bool here
+  ERel expr1@(ETyped _ typ) relOp expr2 -> do
     ident1 <- newVar
     ident2 <- newVar
     compileExpr ident1 expr1
@@ -351,6 +358,11 @@ emit s = emitLabel $ "  " ++ s
 
 emitLabel :: String -> GenM ()
 emitLabel s = code %= (s:)
+
+emitStringLiterals :: GenM ()
+emitStringLiterals = do
+  literals <- use stringLiterals
+  code %= (++ literals)
 
 addVar :: String -> GenM String
 addVar x = do 
@@ -446,6 +458,15 @@ emptyContStack = do
   case st of
     [] -> return True
     _  -> return False
+
+
+addStringLiteral :: String -> String -> GenM Int
+addStringLiteral stringVar string = do
+  let escapedString = string ++ "\\0A\\00"
+  let newLength = length escapedString
+  let globalString = "@" ++ stringVar ++ " = internal constant [" ++ show newLength ++ ", i8] c\"" ++ escapedString ++ "\""
+  stringLiterals %= (globalString:)
+  return newLength
 
 --- Old state stuff for reference purpose ---
 
