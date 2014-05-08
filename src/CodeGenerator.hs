@@ -76,7 +76,10 @@ compileTopDefs (FnDef typ (Ident name) args block : rest) = do
     emitConvertedArgs
     emit $ "br label %" ++ lbl
     emitLabel $ lbl ++ ":"
-    compileBlock block
+
+    case block of
+      Block [] -> emit "unreachable"
+      x -> compileBlock x
 
     emitLabel "}"
 

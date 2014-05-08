@@ -2,4 +2,7 @@
 *.hi
 *.tar.gz
 /tests/Grade
-src/graderTestSuite
+jlc
+*.bc
+*.ll
+graderTestSuite

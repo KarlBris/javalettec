@@ -1,9 +1,9 @@
 SOURCES = $(wildcard *.hs) Grammar/
 
-all: jlc
+all: ../jlc
 
-jlc: $(SOURCES)
-	ghc -Wall --make Compiler.hs -o jlc -odir build -hidir build
+../jlc: $(SOURCES)
+	ghc -Wall --make Compiler.hs -o ../jlc -odir build -hidir build
 
 Grammar/: Grammar.cf
 	bnfc -d Grammar.cf
@@ -12,17 +12,6 @@ Grammar/: Grammar.cf
 	alex -g Grammar/Lex.x
 	happy -gca Grammar/Par.y
 	rm Grammar/*.bak
-
-# Usage: make test FILE=../tests/testsuite/good/core021.jl
-test: jlc
-	@rm -rf tmp/
-	@mkdir tmp
-	@echo "######### ${FILE}\n"
-	@cat ${FILE} && \
-	./jlc ${FILE} > tmp/test.llvm && \
-	echo "\n\n######### tmp/test.llvm\n" && cat tmp/test.llvm && \
-	opt -std-compile-opts -mem2reg tmp/test.llvm > tmp/test.bc && \
-  llvm-dis tmp/test.bc && echo "\n\n######### tmp/test.ll\n" && cat tmp/test.ll
 
 .PHONY: clean distclean test
 clean:
