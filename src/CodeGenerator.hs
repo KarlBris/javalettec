@@ -62,8 +62,6 @@ compileProgram (Program topDefs) = do
   compileTopDefs topDefs
   emitStringLiterals
 
-  emit $ printTree (Program topDefs)
-
 compileTopDefs :: [TopDef] -> GenM ()
 compileTopDefs [] = return ()
 compileTopDefs (FnDef typ (Ident name) args block : rest) = do
@@ -122,10 +120,10 @@ compileStmt s = (emit $ "; " ++ show s) >> case s of
   BStmt block               -> do
     compileBlock block
   Decl typ ((NoInit (Ident ident)):rest)    -> do
-    ident' <- addVar ident
-    let typ' = makeLLVMType typ
-    emit $ "%" ++ ident' ++ " = alloca " ++ typ'
-    emit $ "store " ++ typ' ++ " 0, " ++ typ' ++ "* %" ++ ident'
+    targetReg <- addVar ident
+    let llvmType = makeLLVMType typ
+    emit $ "%" ++ targetReg ++ " = alloca " ++ llvmType
+    emit $ "store " ++ llvmType ++ " " ++ initValue typ ++ ", " ++ llvmType ++ "* %" ++ targetReg
     compileStmt (Decl typ rest)
   Decl typ ((Init (Ident ident) expr):rest) -> do
     ident' <- addVar ident
@@ -348,6 +346,9 @@ getRelOp Doub GE  = "fcmp uge"
 getRelOp Doub EQU = "fcmp ueq"
 getRelOp Doub NE  = "fcmp une"
 
+initValue :: Type -> String
+initValue Doub = "0.0"
+initValue _ = "0"
 
 {-
 
@@ -481,8 +482,8 @@ emptyContStack = do
 
 addStringLiteral :: String -> String -> GenM Int
 addStringLiteral stringVar string = do
-  let escapedString = string ++ "\\0A\\00"
-  let newLength = length string + 2
+  let escapedString = string ++ "\\00"
+  let newLength = length string + 1
   let globalString = "@" ++ stringVar ++ " = internal constant [" ++ show newLength ++ " x i8] c\"" ++ escapedString ++ "\""
   stringLiterals %= (globalString:)
   return newLength

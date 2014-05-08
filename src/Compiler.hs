@@ -1,6 +1,8 @@
 import System.Environment
 import System.IO
+import System.FilePath.Posix
 import System.Exit
+import System.Process
 
 import qualified Grammar.Par as Par 
 import Grammar.ErrM
@@ -11,16 +13,16 @@ main :: IO ()
 main = do 
   args <- getArgs
   case args of
-    [] -> getContents >>= compile
+    [] -> getContents >>= compile Nothing
     fs -> mapM_ readAndCompile fs
 
 readAndCompile :: String -> IO ()
-readAndCompile fp = do
-  source <- readFile fp
-  compile source
+readAndCompile sourcePath = do
+  source <- readFile sourcePath
+  compile (Just sourcePath) source
 
-compile :: String -> IO ()
-compile source = do
+compile :: Maybe String -> String -> IO ()
+compile mbSrcFile source = do
   case process source of
     Bad s    -> do
       hPutStrLn stderr "ERROR"
@@ -29,6 +31,12 @@ compile source = do
     Ok llvm -> do
       hPutStrLn stderr "OK"
       putStrLn llvm
+      case mbSrcFile of
+        Nothing -> return ()
+        Just srcPath -> do
+          writeFile (dropExtension srcPath ++ ".ll") llvm
+          _ <- system $ "llvm-as " ++ (dropExtension srcPath ++ ".ll")
+          return ()
 
 process :: String -> Err String
 process source = do

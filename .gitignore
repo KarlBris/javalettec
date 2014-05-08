@@ -1,3 +1,5 @@
 *.o
 *.hi
 *.tar.gz
+/tests/Grade
+src/graderTestSuite

@@ -1,5 +1,7 @@
 SOURCES = $(wildcard *.hs) Grammar/
 
+all: jlc
+
 jlc: $(SOURCES)
 	ghc -Wall --make Compiler.hs -o jlc -odir build -hidir build
 
@@ -26,6 +28,8 @@ test: jlc
 clean:
 	-rm -rf build
 	-rm -f jlc
+	-rm -f a.out
 	-rm -rf tmp
+	-rm -rf graderTestSuite
 distclean: clean
 	
