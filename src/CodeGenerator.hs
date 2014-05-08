@@ -9,6 +9,7 @@ import Data.List
 
 import Grammar.Abs
 import Grammar.ErrM
+import Grammar.Print
 
 type GenM a = StateT Env Err a
 
@@ -67,11 +68,13 @@ compileTopDefs (FnDef typ (Ident name) args block : rest) = do
   emit ""
 
   scoped $ do
-    args' <- llvmArgs
-    emitLabel $ "define " ++ makeLLVMType typ ++ " @" ++ name ++ "(" ++ args' ++ ") {"
+    llvmArgs <- convertArgs
+    emitLabel $ "define " ++ makeLLVMType typ ++ " @" ++ name ++ "(" ++ llvmArgs ++ ") {"
 
     lbl <- newLabel
-    emitLabel $ "entry: br label %" ++ lbl
+    emitLabel $ "entry:"
+    emitConvertedArgs
+    emit $ "br label %" ++ lbl
     emitLabel $ lbl ++ ":"
     compileBlock block
 
@@ -79,10 +82,8 @@ compileTopDefs (FnDef typ (Ident name) args block : rest) = do
 
   compileTopDefs rest
   where
-    llvmArgs :: GenM String
-    llvmArgs = do
-      args' <- makeLLVMArgs args
-      return $ intercalate ", " (args')
+    convertArgs :: GenM String
+    convertArgs = makeLLVMArgs args >>= \as -> return (intercalate ", " as)
 
     makeLLVMArgs :: [Arg] -> GenM [String]
     makeLLVMArgs (Arg t (Ident n) : xs) = do
@@ -90,6 +91,15 @@ compileTopDefs (FnDef typ (Ident name) args block : rest) = do
       rest <- makeLLVMArgs xs
       return $ (makeLLVMType t ++ " %" ++ newVar) : rest
     makeLLVMArgs [] = return []
+
+    emitConvertedArgs :: GenM ()
+    emitConvertedArgs = do
+      forM_ args $ \(Arg t (Ident n)) -> do
+        newReg <- newVar
+        emit $ "%" ++ newReg ++ " = alloca " ++ makeLLVMType t
+        oldReg <- lookupVar n
+        store t oldReg newReg
+        setVar n newReg
 
 makeLLVMType :: Type -> String
 makeLLVMType Int    = "i32"
@@ -105,7 +115,7 @@ compileBlock (Block stmts) = do
     else withInitStmt stmt
 
 compileStmt :: Stmt -> GenM ()
-compileStmt s = case s of
+compileStmt s = (emit $ "; " ++ show s) >> case s of
   Empty                     -> fail "You're in luck, you got an empty stmt!"
   BStmt block               -> do
     compileBlock block
@@ -125,10 +135,12 @@ compileStmt s = case s of
     compileStmt (Decl typ rest)
   Decl _ []                         -> do
     return ()
-  Ass (Ident ident) expr            -> do
-    setReg <- newVar
-    compileExpr setReg expr
-    setVar ident setReg
+  Ass (Ident ident) expr@(ETyped _ t)            -> do
+    exprReg <- newVar
+    compileExpr exprReg expr
+    newReg <- addVar ident
+    emit $ "%" ++ newReg ++ " = alloca " ++ (makeLLVMType t)
+    store t exprReg newReg
   Incr ident                -> return ()
   Decr ident                -> return ()
   Ret e@(ETyped _ typ)    -> do
