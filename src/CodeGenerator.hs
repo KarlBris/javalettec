@@ -62,6 +62,8 @@ compileProgram (Program topDefs) = do
   compileTopDefs topDefs
   emitStringLiterals
 
+  emit $ printTree (Program topDefs)
+
 compileTopDefs :: [TopDef] -> GenM ()
 compileTopDefs [] = return ()
 compileTopDefs (FnDef typ (Ident name) args block : rest) = do
@@ -234,25 +236,25 @@ compileExpr resultReg e = case e of
     var <- lookupVar ident
     emit $ "%" ++ resultReg ++ " = load " ++ makeLLVMType typ ++ "* %" ++ var
   ELitInt integer        -> do
-    ident <- newVar
-    emit $ "%" ++ ident ++ " = alloca i32"
-    emit $ "store i32 " ++ show integer ++ ", i32* %" ++ ident
-    emit $ "%" ++ resultReg ++ " = load i32* %" ++ ident
+    tempReg <- newVar
+    emit $ "%" ++ tempReg ++ " = alloca i32"
+    emit $ "store i32 " ++ show integer ++ ", i32* %" ++ tempReg
+    emit $ "%" ++ resultReg ++ " = load i32* %" ++ tempReg
   ELitDoub double        -> do
-    ident <- newVar
-    emit $ "%" ++ ident ++ " = alloca double"
-    emit $ "store double " ++ show double ++ ", double* %" ++ ident
-    emit $ "%" ++ resultReg ++ " = load double* %" ++ ident
+    tempReg <- newVar
+    emit $ "%" ++ tempReg ++ " = alloca double"
+    emit $ "store double " ++ show double ++ ", double* %" ++ tempReg
+    emit $ "%" ++ resultReg ++ " = load double* %" ++ tempReg
   ELitTrue               -> do
-    ident <- newVar
-    emit $ "%" ++ ident ++ " = alloca i1"
-    emit $ "store i1 true, i1* %" ++ ident
-    emit $ "%" ++ resultReg ++ " = load i1* %" ++ ident
+    tempReg <- newVar
+    emit $ "%" ++ tempReg ++ " = alloca i1"
+    emit $ "store i1 true, i1* %" ++ tempReg
+    emit $ "%" ++ resultReg ++ " = load i1* %" ++ tempReg
   ELitFalse              -> do
-    ident <- newVar
-    emit $ "%" ++ ident ++ " = alloca i1"
-    emit $ "store i1 false, i1* %" ++ ident
-    emit $ "%" ++ resultReg ++ " = load i1* %" ++ ident
+    tempReg <- newVar
+    emit $ "%" ++ tempReg ++ " = alloca i1"
+    emit $ "store i1 false, i1* %" ++ tempReg
+    emit $ "%" ++ resultReg ++ " = load i1* %" ++ tempReg
   EApp (Ident ident) exprs       -> do
     typ <- getCurrentExpType
     let l = length exprs
