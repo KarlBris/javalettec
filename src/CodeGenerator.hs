@@ -9,7 +9,7 @@ import Data.List
 
 import Grammar.Abs
 import Grammar.ErrM
-import Grammar.Print
+--import Grammar.Print
 
 type GenM a = StateT Env Err a
 
@@ -119,7 +119,7 @@ compileBlock (Block stmts) = do
 
 compileStmt :: Stmt -> GenM ()
 compileStmt s = (emit $ "; " ++ show s) >> case s of
-  Empty                     -> fail "You're in luck, you got an empty stmt!"
+  Empty                     -> return ()
   BStmt block               -> do
     compileBlock block
   Decl typ ((NoInit (Ident ident)):rest)    -> do

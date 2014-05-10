@@ -100,14 +100,14 @@ checkStmt (Ass ident expr) = do
 
 checkStmt s@(Incr ident) = do
   t <- lookupVar ident
-  assert (t `elem` [Int, Doub]) $ "Invalid increment: " ++
-                                  "type " ++ show t ++ " does not support `++`"
+  assert (t == Int) $ "Invalid increment: " ++
+                      "type " ++ show t ++ " does not support `++`"
   return s
 
 checkStmt s@(Decr ident) = do
   t <- lookupVar ident
-  assert (t `elem` [Int, Doub]) $ "Invalid decrement: " ++
-                                  "type " ++ show t ++ " does not support `--`"
+  assert (t == Int) $ "Invalid decrement: " ++
+                      "type " ++ show t ++ " does not support `--`"
   return s
 
 checkStmt (Ret expr) = do
