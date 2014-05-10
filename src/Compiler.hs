@@ -1,11 +1,11 @@
-import System.Environment
-import System.IO
-import System.FilePath.Posix
-import System.Exit
-import System.Process
+import System.Environment (getArgs)
+import System.IO (hPutStrLn, stderr)
+import System.FilePath.Posix (dropExtension)
+import System.Exit (exitWith, ExitCode(..))
+import System.Process (system)
 
-import qualified Grammar.Par as Par 
-import Grammar.ErrM
+import Grammar.Par (myLexer, pProgram)
+import Grammar.ErrM (Err(Bad, Ok))
 import TypeChecker
 import CodeGenerator
 
@@ -40,7 +40,7 @@ compile mbSrcFile source = do
 
 process :: String -> Err String
 process source = do
-  let tokens = Par.myLexer source
-  tree  <- Par.pProgram tokens
+  let tokens = myLexer source
+  tree  <- pProgram tokens
   typed_tree <- typecheck tree
   compilellvm typed_tree

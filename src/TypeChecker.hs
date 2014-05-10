@@ -7,8 +7,8 @@ import Control.Monad (liftM)
 import Control.Monad.State (StateT, evalStateT)
 import Data.Maybe (isJust)
 
+import Grammar.ErrM (Err(Bad, Ok))
 import Grammar.Abs
-import Grammar.ErrM
 
 
 type CheckM a = StateT SEnv Err a
