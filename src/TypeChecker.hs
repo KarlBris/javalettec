@@ -2,14 +2,14 @@
 
 module TypeChecker where
 
-import Control.Lens
-import Control.Monad
-import Control.Monad.State
-import Data.List
-import Data.Maybe
+import Control.Lens (makeLenses, use, (.=), (%=))
+import Control.Monad (liftM)
+import Control.Monad.State (StateT, evalStateT)
+import Data.Maybe (isJust)
+
 import Grammar.Abs
-import Grammar.Print
 import Grammar.ErrM
+
 
 type CheckM a = StateT SEnv Err a
 
@@ -33,47 +33,50 @@ type ScopeList = [[(Ident, Type)]]
 
 makeLenses ''SEnv
 
+
 typecheck :: Program -> Err Program
 typecheck (Program topDefs) = do
   let ss = buildSymbolTable topDefs
   checkSymbolTable ss
-  topDefs' <- evalStateT (mapM checkTopDef topDefs) (emptySEnv{_symbols = ss})
-  return $ Program topDefs'
+  typedTopDefs <- evalStateT (mapM typecheckTopDef topDefs) (emptySEnv{_symbols = ss})
+  return $ Program typedTopDefs
 
 buildSymbolTable :: [TopDef] -> SymbolTable
 buildSymbolTable []                           = primitiveFunctions
 buildSymbolTable (FnDef t ident args _ : tds) = (ident, (map typeOf args, t)) : buildSymbolTable tds
   where 
-    typeOf (Arg t ident) = t
+    typeOf (Arg a _) = a
 
 primitiveFunctions :: SymbolTable
-primitiveFunctions = [ (Ident "printInt",    ([Int],  Void))
-                     , (Ident "printDouble", ([Doub], Void))
-                     , (Ident "printString", ([String], Void))
-                     , (Ident "readInt",     ([],     Int ))
-                     , (Ident "readDouble",  ([],     Doub))]
+primitiveFunctions = 
+    [ (Ident "printInt",    ([Int],  Void))
+    , (Ident "printDouble", ([Doub], Void))
+    , (Ident "printString", ([String], Void))
+    , (Ident "readInt",     ([],     Int ))
+    , (Ident "readDouble",  ([],     Doub)) ]
 
 checkSymbolTable :: SymbolTable -> Err ()
-checkSymbolTable symbols | null dups = Ok ()
-                         | otherwise = fail $ show (head dups) ++ " is already defined"
-                      where
-                        dups = duplicates $ map fst symbols
+checkSymbolTable symbolTable 
+    | null dups = Ok ()
+    | otherwise = fail $ show (head dups) ++ " is already defined"
+  where
+    dups = duplicates $ map fst symbolTable
 
-checkTopDef :: TopDef -> CheckM TopDef
-checkTopDef (FnDef t ident args block) = do
+typecheckTopDef :: TopDef -> CheckM TopDef
+typecheckTopDef (FnDef t ident args block) = do
     fnType .= t
     fnReturned .= False
 
     enterScope
-    mapM_ (\(Arg t i) -> addVar i t) args
-    block' <- checkBlock block
+    mapM_ (\(Arg argtype argname) -> addVar argname argtype) args
+    typedBlock <- checkBlock block
     exitScope
 
     -- Check explicit return
     didReturn <- use fnReturned
     assert (didReturn || t == Void) "Implicit return for non-void function"
 
-    return (FnDef t ident args block')
+    return (FnDef t ident args typedBlock)
 
 checkBlock :: Block -> CheckM Block
 checkBlock (Block stms) = liftM Block (mapM checkStmt stms)
@@ -88,15 +91,15 @@ checkStmt (BStmt block) = do
   return (BStmt typedBlock)
 
 checkStmt (Decl t items) = do
-  items' <- mapM (checkItem t) items
-  return (Decl t items')
+  typedItems <- mapM (checkItem t) items
+  return (Decl t typedItems)
 
 checkStmt (Ass ident expr) = do
-  t <- lookupVar ident
-  expr'@(ETyped _ t') <- inferExpr expr
-  assert (t == t') $  "Invalid assignment: " ++
-                      "expected " ++ show t ++ ", got " ++ show t'
-  return (Ass ident expr')
+  declaredType <- lookupVar ident
+  typedExpr@(ETyped _ inferredType) <- inferExpr expr
+  assert (declaredType == inferredType) $  "Invalid assignment: " ++
+                      "expected " ++ show declaredType ++ ", got " ++ show inferredType
+  return (Ass ident typedExpr)
 
 checkStmt s@(Incr ident) = do
   t <- lookupVar ident
@@ -111,11 +114,13 @@ checkStmt s@(Decr ident) = do
   return s
 
 checkStmt (Ret expr) = do
-  t <- use fnType
-  expr'@(ETyped _ t') <- inferExpr expr
-  assert (t == t') $ "Invalid return: expected " ++ show t ++ ", got " ++ show t'
+  declaredType <- use fnType
+  typedExpr@(ETyped _ inferredType) <- inferExpr expr
+  assert (declaredType == inferredType) $ 
+      "Invalid return: expected " ++ show declaredType ++ 
+      ", got " ++ show inferredType
   fnReturned .= True
-  return (Ret expr')
+  return (Ret typedExpr)
 
 checkStmt VRet = do
   t <- use fnType
@@ -123,22 +128,22 @@ checkStmt VRet = do
   return VRet
 
 checkStmt (Cond expr stmt) = do
-  didReturn <- use fnReturned -- save current value of fnReturned
+  alreadyReturned <- use fnReturned -- save current value of fnReturned
   fnReturned .= False
 
-  expr'@(ETyped _ t) <- inferExpr expr
+  typedExpr@(ETyped _ t) <- inferExpr expr
   assert (t == Bool) $ "Non-bool condition to if-statement: " ++ show t
-  stmt' <- checkStmt stmt
-  didReturn' <- use fnReturned
+  typedStmt <- checkStmt stmt
+  didReturn <- use fnReturned
 
-  (fnReturned .=) $ didReturn || (didReturn' && isLiterallyTrue expr')
+  (fnReturned .=) $ alreadyReturned || (didReturn && isLiterallyTrue typedExpr)
 
-  return (Cond expr' stmt')
+  return (Cond typedExpr typedStmt)
 
 checkStmt (CondElse expr stmt1 stmt2) = do
-  didReturn <- use fnReturned -- save current value of fnReturned
+  alreadyReturned <- use fnReturned -- save current value of fnReturned
 
-  expr'@(ETyped _ t) <- inferExpr expr
+  typedExpr@(ETyped _ t) <- inferExpr expr
   assert (t == Bool) $ "Non-bool condition to if-statement: " ++ show t
 
   fnReturned .= False
@@ -149,15 +154,15 @@ checkStmt (CondElse expr stmt1 stmt2) = do
   stmt2' <- checkStmt stmt2
   didReturn2 <- use fnReturned
 
-  (fnReturned .=) $ didReturn ||
+  (fnReturned .=) $ alreadyReturned ||
       (didReturn1 && didReturn2) ||
-      (didReturn1 && isLiterallyTrue expr') ||
-      (didReturn2 && isLiterallyFalse expr')
+      (didReturn1 && isLiterallyTrue typedExpr) ||
+      (didReturn2 && isLiterallyFalse typedExpr)
 
-  return (CondElse expr' stmt1' stmt2')
+  return (CondElse typedExpr stmt1' stmt2')
 
 checkStmt (While expr stmt) = do
-  didReturn <- use fnReturned -- save current value of fnReturned
+  alreadyReturned <- use fnReturned -- save current value of fnReturned
   fnReturned .= False
 
   typedExpr@(ETyped _ t) <- inferExpr expr
@@ -166,16 +171,16 @@ checkStmt (While expr stmt) = do
       show t ++
       ") to while-statement: " ++
       show expr
-  stmt' <- checkStmt stmt
+  typedStmt <- checkStmt stmt
 
-  didReturn' <- use fnReturned
-  (fnReturned .=) $ didReturn || (didReturn' && isLiterallyTrue typedExpr)
+  didReturn <- use fnReturned
+  (fnReturned .=) $ alreadyReturned || (didReturn && isLiterallyTrue typedExpr)
   
-  return (While typedExpr stmt')
+  return (While typedExpr typedStmt)
 
 checkStmt (SExp expr) = do
-  expr' <- inferExpr expr
-  return $ SExp expr'
+  typedExpr <- inferExpr expr
+  return $ SExp typedExpr
 
 
 isLiterallyTrue :: Expr -> Bool
@@ -200,12 +205,14 @@ checkItem :: Type -> Item -> CheckM Item
 checkItem t (NoInit ident) = do
   addVar ident t
   return $ NoInit ident
-checkItem t (Init ident expr) = do
-  expr'@(ETyped _ t') <- inferExpr expr
-  assert (t == t') $  "Invalid variale initialization: " ++
-                      "expected " ++ show t ++ ", got " ++ show t'
-  addVar ident t
-  return $ Init ident expr'
+
+checkItem declaredType (Init ident expr) = do
+  typedExpr@(ETyped _ inferredType) <- inferExpr expr
+  assert (declaredType == inferredType) $ 
+      "Invalid variale initialization: " ++
+      "expected " ++ show declaredType ++ ", got " ++ show inferredType
+  addVar ident declaredType
+  return $ Init ident typedExpr
 
 
 inferExpr :: Expr -> CheckM Expr
@@ -214,10 +221,10 @@ inferExpr expr@(EVar ident) = do
   t <- lookupVar ident
   return $ ETyped expr t
 
-inferExpr expr@(ELitInt val) =
+inferExpr expr@(ELitInt _) =
   return $ ETyped expr Int
 
-inferExpr expr@(ELitDoub val) =
+inferExpr expr@(ELitDoub _) =
   return $ ETyped expr Doub
 
 inferExpr ELitTrue =
@@ -226,7 +233,7 @@ inferExpr ELitTrue =
 inferExpr ELitFalse =
   return $ ETyped ELitFalse Bool
 
-inferExpr expr@(EApp ident argexprs) = do
+inferExpr (EApp ident argexprs) = do
     ss <- use symbols
     typedargexprs <- mapM inferExpr argexprs
 
@@ -250,79 +257,76 @@ inferExpr expr@(EApp ident argexprs) = do
     checkEqualTypes (_, e) = fail $ "Internal compiler error: " ++ show e ++
       " was incorrectly type-inferred"
 
-inferExpr expr@(EString strval) =
+inferExpr expr@(EString _) =
   return $ ETyped expr String
 
 inferExpr (Neg expr) = do
-  nexpr@(ETyped _ t) <- inferExpr expr
+  typedExpr@(ETyped _ t) <- inferExpr expr
   assert (t `elem` [Int, Doub]) $"Attempt to negate non-numeric type " ++ show t
-  return $ ETyped (Neg nexpr) t
+  return $ ETyped (Neg typedExpr) t
 
 inferExpr (Not expr) = do
-  nexpr@(ETyped _ t) <- inferExpr expr
+  typedExpr@(ETyped _ t) <- inferExpr expr
   assert (t == Bool) $ "Attempt to negate non-bool type " ++ show t
-  return $ ETyped (Not nexpr) t
+  return $ ETyped (Not typedExpr) t
 
 inferExpr (EMul expr1 op expr2) = do
-  nexpr1@(ETyped _ t1) <- inferExpr expr1
-  nexpr2@(ETyped _ t2) <- inferExpr expr2
+  typedExpr1@(ETyped _ t1) <- inferExpr expr1
+  typedExpr2@(ETyped _ t2) <- inferExpr expr2
   let errmsg =  "Incompatible types for operator " ++ show op ++ ": " ++
                 show t1 ++ " and " ++ show t2
   assert (t1 == t2) errmsg
   assert (t1 /= Doub || op /= Mod) errmsg
   assert (t1 `elem` [Int, Doub]) errmsg
-  return $ ETyped (EMul nexpr1 op nexpr2) t1
+  return $ ETyped (EMul typedExpr1 op typedExpr2) t1
 
 inferExpr (EAdd expr1 op expr2) = do
-  nexpr1@(ETyped _ t1) <- inferExpr expr1
-  nexpr2@(ETyped _ t2) <- inferExpr expr2
+  typedExpr1@(ETyped _ t1) <- inferExpr expr1
+  typedExpr2@(ETyped _ t2) <- inferExpr expr2
   let errmsg =  "Incompatible types for operator " ++ show op ++ ": " ++
                 show t1 ++ " and " ++ show t2
   assert (t1 == t2) errmsg
   assert (t1 `elem` [Int, Doub]) errmsg
-  return $ ETyped (EAdd nexpr1 op nexpr2) t1
+  return $ ETyped (EAdd typedExpr1 op typedExpr2) t1
 
 inferExpr (ERel expr1 op expr2) = do
-  nexpr1@(ETyped _ t1) <- inferExpr expr1
-  nexpr2@(ETyped _ t2) <- inferExpr expr2
+  typedExpr1@(ETyped _ t1) <- inferExpr expr1
+  typedExpr2@(ETyped _ t2) <- inferExpr expr2
   let errmsg =  "Incompatible types for operator " ++ show op ++ ": " ++
                 show t1 ++ " and " ++ show t2
   assert (t1 == t2) errmsg
   assert (t1 `elem` [Int, Doub] || (t1 == Bool && op `elem` [EQU, NE])) errmsg
-  return $ ETyped (ERel nexpr1 op nexpr2) Bool
+  return $ ETyped (ERel typedExpr1 op typedExpr2) Bool
 
 inferExpr (EAnd expr1 expr2) = do
-  nexpr1@(ETyped _ t1) <- inferExpr expr1
-  nexpr2@(ETyped _ t2) <- inferExpr expr2
+  typedExpr1@(ETyped _ t1) <- inferExpr expr1
+  typedExpr2@(ETyped _ t2) <- inferExpr expr2
   let errmsg =  "Incompatible types for operator AND: " ++
                 show t1 ++ " and " ++ show t2
   assert (t1 == t2) errmsg
   assert (t1 == Bool) errmsg
-  return $ ETyped (EAnd nexpr1 nexpr2) t1
+  return $ ETyped (EAnd typedExpr1 typedExpr2) t1
 
 inferExpr (EOr expr1 expr2) = do
-  nexpr1@(ETyped _ t1) <- inferExpr expr1
-  nexpr2@(ETyped _ t2) <- inferExpr expr2
+  typedExpr1@(ETyped _ t1) <- inferExpr expr1
+  typedExpr2@(ETyped _ t2) <- inferExpr expr2
   let errmsg =  "Incompatible types for operator OR: " ++
                 show t1 ++ " and " ++ show t2
   assert (t1 == t2) errmsg
   assert (t1 == Bool) errmsg
-  return $ ETyped (EOr nexpr1 nexpr2) t1
+  return $ ETyped (EOr typedExpr1 typedExpr2) t1
 
-inferExpr expr@(ETyped _ _) = return expr
-
-
-
+inferExpr _ = fail "CRITICAL: Attempting to infer already typed expression"
 
 lookupVar :: Ident -> CheckM Type
-lookupVar x = do
+lookupVar name = do
     scopes <- use env
-    lookupVar' scopes x
+    recursiveLookup scopes name
   where
-    lookupVar' :: ScopeList -> Ident -> CheckM Type
-    lookupVar' [] x       = fail $ "CRITICAL ERROR: No scope to find " ++ show x
-    lookupVar' (s:rest) x = case lookup x s of
-                              Nothing -> lookupVar' rest x
+    recursiveLookup :: ScopeList -> Ident -> CheckM Type
+    recursiveLookup [] x       = fail $ "CRITICAL ERROR: No scope to find " ++ show x
+    recursiveLookup (s:rest) x = case lookup x s of
+                              Nothing -> recursiveLookup rest x
                               Just t  -> return t
 
 
