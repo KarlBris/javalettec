@@ -144,8 +144,24 @@ compileStmt s = (emit $ "; " ++ show s) >> case s of
     newReg <- addVar ident
     emit $ "%" ++ newReg ++ " = alloca " ++ (makeLLVMType t)
     store t exprReg newReg
-  Incr ident                -> return ()
-  Decr ident                -> return ()
+  Incr (Ident ident)                -> do
+    resultReg <- newVar
+    varReg <- newVar
+    adrReg <- lookupVar ident
+    emit $ "%" ++ varReg ++ " = load i32* %" ++ adrReg
+    emit $ "%" ++ resultReg ++ " = add i32 %" ++ varReg ++ ", 1"
+    newReg <- addVar ident
+    emit $ "%" ++ newReg ++ " = alloca i32"
+    store Int resultReg newReg
+  Decr (Ident ident)               -> do
+    resultReg <- newVar
+    varReg <- newVar
+    adrReg <- lookupVar ident
+    emit $ "%" ++ varReg ++ " = load i32* %" ++ adrReg
+    emit $ "%" ++ resultReg ++ " = sub i32 %" ++ varReg ++ ", 1"
+    newReg <- addVar ident
+    emit $ "%" ++ newReg ++ " = alloca i32"
+    store Int resultReg newReg
   Ret e@(ETyped _ typ)    -> do
     ident <- newVar
     compileExpr ident e
