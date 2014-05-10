@@ -77,9 +77,11 @@ compileTopDefs (FnDef typ (Ident name) args block : rest) = do
     emit $ "br label %" ++ lbl
     emitLabel $ lbl ++ ":"
 
-    case block of
-      Block [] -> emit "unreachable"
-      x -> compileBlock x
+    compileBlock block
+
+    if typ == Void
+      then emit "ret void" -- Catch that implicit return
+      else return ()
 
     emitLabel "}"
 
@@ -141,27 +143,22 @@ compileStmt s = (emit $ "; " ++ show s) >> case s of
   Ass (Ident ident) expr@(ETyped _ t)            -> do
     exprReg <- newVar
     compileExpr exprReg expr
-    newReg <- addVar ident
-    emit $ "%" ++ newReg ++ " = alloca " ++ (makeLLVMType t)
-    store t exprReg newReg
+    retReg <- lookupVar ident
+    store t exprReg retReg
   Incr (Ident ident)                -> do
     resultReg <- newVar
     varReg <- newVar
     adrReg <- lookupVar ident
     emit $ "%" ++ varReg ++ " = load i32* %" ++ adrReg
     emit $ "%" ++ resultReg ++ " = add i32 %" ++ varReg ++ ", 1"
-    newReg <- addVar ident
-    emit $ "%" ++ newReg ++ " = alloca i32"
-    store Int resultReg newReg
+    store Int resultReg adrReg
   Decr (Ident ident)               -> do
     resultReg <- newVar
     varReg <- newVar
     adrReg <- lookupVar ident
     emit $ "%" ++ varReg ++ " = load i32* %" ++ adrReg
     emit $ "%" ++ resultReg ++ " = sub i32 %" ++ varReg ++ ", 1"
-    newReg <- addVar ident
-    emit $ "%" ++ newReg ++ " = alloca i32"
-    store Int resultReg newReg
+    store Int resultReg adrReg
   Ret e@(ETyped _ typ)    -> do
     ident <- newVar
     compileExpr ident e
@@ -299,7 +296,7 @@ compileExpr resultReg e = case e of
   Not expr               -> do
     ident <- newVar
     compileExpr ident expr
-    emit $ "%" ++ resultReg ++ " = xor i1 %" ++ ident ++ ", %" ++ ident
+    emit $ "%" ++ resultReg ++ " = xor i1 %" ++ ident ++ ", true"
   EMul expr1 mulOp expr2 -> do
     typ <- getCurrentExpType
     ident1 <- newVar
@@ -364,6 +361,8 @@ getRelOp Doub GTH = "fcmp ugt"
 getRelOp Doub GE  = "fcmp uge"
 getRelOp Doub EQU = "fcmp ueq"
 getRelOp Doub NE  = "fcmp une"
+getRelOp Bool EQU = "icmp eq"
+getRelOp Bool NE  = "icmp ne"
 
 initValue :: Type -> String
 initValue Doub = "0.0"

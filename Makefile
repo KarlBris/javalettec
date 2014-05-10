@@ -1,12 +1,15 @@
-jlc:
+jlc: src/
 	cd src; make
 
-.PHONY: clean test
+.PHONY: clean test grade
 
 clean: 
 	cd src; make clean
 	-rm -rf graderTestSuite
 	-rm -f jlc
+
+grade: jlc
+	cd tests; make && ./Grade -b LLVM . ..
 
 # Usage: make test FILE=tests/testsuite/good/core021.jl
 test: jlc

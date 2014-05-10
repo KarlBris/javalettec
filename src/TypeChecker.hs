@@ -288,7 +288,7 @@ inferExpr (ERel expr1 op expr2) = do
   let errmsg =  "Incompatible types for operator " ++ show op ++ ": " ++
                 show t1 ++ " and " ++ show t2
   assert (t1 == t2) errmsg
-  assert (t1 `elem` [Int, Doub] || (t1 == Bool && op == EQU)) errmsg
+  assert (t1 `elem` [Int, Doub] || (t1 == Bool && op `elem` [EQU, NE])) errmsg
   return $ ETyped (ERel nexpr1 op nexpr2) Bool
 
 inferExpr (EAnd expr1 expr2) = do
