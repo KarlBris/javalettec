@@ -1,4 +1,4 @@
-jlc: src/
+jlc: src/*
 	cd src; make
 
 .PHONY: clean test grade

@@ -131,11 +131,11 @@ compileStmt s = (emit $ "; " ++ show s) >> case s of
     emit $ "store " ++ llvmType ++ " " ++ initValue typ ++ ", " ++ llvmType ++ "* %" ++ targetReg
     compileStmt (Decl typ rest)
   Decl typ ((Init (Ident ident) expr):rest) -> do
-    ident' <- addVar ident
     let typ' = makeLLVMType typ
-    emit $ "%" ++ ident' ++ " = alloca " ++ typ'
     ident'' <- newVar
     compileExpr ident'' expr
+    ident' <- addVar ident
+    emit $ "%" ++ ident' ++ " = alloca " ++ typ'
     store typ ident'' ident'
     compileStmt (Decl typ rest)
   Decl _ []                         -> do
@@ -320,15 +320,63 @@ compileExpr resultReg e = case e of
   EAnd expr1 expr2       -> do
     ident1 <- newVar
     ident2 <- newVar
+
+    cmpMem1 <- newVar
+    cmpMem2 <- newVar
+    cmpReg1 <- newVar
+    cmpReg2 <- newVar
+
+    lblEval <- newLabel
+    lblEnd <- newLabel
+
+    emit $ "%" ++ cmpMem1 ++ " = alloca i1"
+    emit $ "%" ++ cmpMem2 ++ " = alloca i1"
+    emit $ "store i1 false, i1* %" ++ cmpMem2
+
     compileExpr ident1 expr1
+    store Bool ident1 cmpMem1
+    emit $ "br i1 %" ++ ident1 ++ ", label %" ++ lblEval ++ ", label %" ++ lblEnd
+
+    emitLabel $ lblEval ++ ":"
     compileExpr ident2 expr2
-    emit $ "%" ++ resultReg ++ " = and i1 %" ++ ident1 ++ ", %" ++ ident2
+    store Bool ident2 cmpMem2
+    emit $ "br label %" ++ lblEnd
+
+    emitLabel $ lblEnd ++ ":"
+    emit $ "%" ++ cmpReg1 ++ " = load i1* %" ++ cmpMem1
+    emit $ "%" ++ cmpReg2 ++ " = load i1* %" ++ cmpMem2
+    emit $ "%" ++ resultReg ++ " = and i1 %" ++ cmpReg1 ++ ", %" ++ cmpReg2 
+
   EOr expr1 expr2        -> do
     ident1 <- newVar
     ident2 <- newVar
+
+    cmpMem1 <- newVar
+    cmpMem2 <- newVar
+    cmpReg1 <- newVar
+    cmpReg2 <- newVar
+
+    lblEval <- newLabel
+    lblEnd <- newLabel
+
+    emit $ "%" ++ cmpMem1 ++ " = alloca i1"
+    emit $ "%" ++ cmpMem2 ++ " = alloca i1"
+    emit $ "store i1 false, i1* %" ++ cmpMem2
+
     compileExpr ident1 expr1
+    store Bool ident1 cmpMem1
+    emit $ "br i1 %" ++ ident1 ++ ", label %" ++ lblEnd ++ ", label %" ++ lblEval
+
+    emitLabel $ lblEval ++ ":"
     compileExpr ident2 expr2
-    emit $ "%" ++ resultReg ++ " = or i1 %" ++ ident1 ++ ", %" ++ ident2
+    store Bool ident2 cmpMem2
+    emit $ "br label %" ++ lblEnd
+
+    emitLabel $ lblEnd ++ ":"
+    emit $ "%" ++ cmpReg1 ++ " = load i1* %" ++ cmpMem1
+    emit $ "%" ++ cmpReg2 ++ " = load i1* %" ++ cmpMem2
+    emit $ "%" ++ resultReg ++ " = or i1 %" ++ cmpReg1 ++ ", %" ++ cmpReg2 
+
   ETyped expr typ        -> do
     setCurrentExpType typ
     compileExpr resultReg expr
