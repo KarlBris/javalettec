@@ -369,20 +369,6 @@ initValue :: Type -> String
 initValue Doub = "0.0"
 initValue _ = "0"
 
-{-
-
-(From slides)
-
-We need to keep some state information during code generation.
-This includes at least:
-
-* Next number for generating register names (and labels).
-* Definitions of global names for string literals.
-* Lookup table to find LLVM name for Javalette variable name.
-* Lookup table to find type of function.
-
--}
-
 store :: Type -> String -> String -> GenM ()
 store typ src tgt = do
   let typ' = makeLLVMType typ
@@ -506,85 +492,3 @@ addStringLiteral stringVar string = do
   let globalString = "@" ++ stringVar ++ " = internal constant [" ++ show newLength ++ " x i8] c\"" ++ escapedString ++ "\""
   stringLiterals %= (globalString:)
   return newLength
-
---- Old state stuff for reference purpose ---
-
-{-
-
-data Env = E {
-  addresses   :: [[(Ident,Address)]],
-  nextLabel   :: Int,
-  nextAddress :: Address,
-  maxAddress  :: Address,
-  stackSize   :: Int,
-  maxSize     :: Int,
-  code        :: [Instruction],
-  className   :: String,
-  functions   :: M.Map Ident String
-  }
-
-emptyEnv :: Env
-emptyEnv = E {
-  addresses = [[]],
-  nextLabel = 0,
-  nextAddress = 0,
-  maxAddress = 1,
-  stackSize = 0,
-  maxSize = 1,
-  code = [],
-  className = "",
-  functions = M.empty 
-  }
-
-
-type Instruction = String
-type Address = Int
-
-
-
-emit :: Instruction -> State Env ()
-emit i = modify (\env -> env{code = i : code env})
-
-addVar :: Id -> Type -> State Env ()
-addVar x t = modify (\env -> env {
-  addresses = case addresses env of (scope:rest) -> (((x,nextAddress env):scope):rest),
-  nextAddress = nextAddress env + typeSize t
-  })
-
-newLabel :: State Env String
-newLabel = do 
-  env <- get
-  let nextLbl = nextLabel env
-  modify (\env -> env { nextLabel = nextLabel env + 1 })
-  return ("LABEL" ++ (show nextLbl))
-
-typeSize :: Type -> Int
-typeSize t = case t of
-  Type_int -> 1
-  Type_double -> 2
-  Type_bool -> 1
-
-lookupVar :: Id -> State Env Address
-lookupVar x = do
-  env <- get
-  return $ look (addresses env) x 
- where
-   look [] x = error $ "Unknown variable " ++ printTree x ++ "."
-   look (scope:rest) x = case lookup x scope of
-     Nothing -> look rest x
-     Just a  -> a
-
-newBlock :: State Env Address
-newBlock = do
-  modify (\env -> env {addresses = [] : addresses env})
-  env <- get
-  let ret = nextAddress env
-  return ret
-
-exitBlock :: Address -> State Env ()
-exitBlock a = modify (\env -> env {
-   addresses = tail (addresses env),
-   nextAddress = a
-   })
-
--}
