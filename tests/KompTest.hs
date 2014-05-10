@@ -236,6 +236,9 @@ runLLVM libPath bcFile src inp outp = do
   killFile ("a.out")
   system ("llvm-ld " ++ bcFile ++ " " ++ libPath ++"/runtime.bc")
   result <- runProg "./a.out" src inp outp
+  if result
+    then return ()
+    else fail "Test failed"
   setCurrentDirectory d0
   return result
 
