@@ -27,31 +27,36 @@ import Grammar.ErrM
  ',' { PT _ (TS _ 10) }
  '-' { PT _ (TS _ 11) }
  '--' { PT _ (TS _ 12) }
- '/' { PT _ (TS _ 13) }
- ':' { PT _ (TS _ 14) }
- ';' { PT _ (TS _ 15) }
- '<' { PT _ (TS _ 16) }
- '<=' { PT _ (TS _ 17) }
- '=' { PT _ (TS _ 18) }
- '==' { PT _ (TS _ 19) }
- '>' { PT _ (TS _ 20) }
- '>=' { PT _ (TS _ 21) }
- '[' { PT _ (TS _ 22) }
- ']' { PT _ (TS _ 23) }
- 'boolean' { PT _ (TS _ 24) }
- 'double' { PT _ (TS _ 25) }
- 'else' { PT _ (TS _ 26) }
- 'false' { PT _ (TS _ 27) }
- 'if' { PT _ (TS _ 28) }
- 'int' { PT _ (TS _ 29) }
- 'return' { PT _ (TS _ 30) }
- 'string' { PT _ (TS _ 31) }
- 'true' { PT _ (TS _ 32) }
- 'void' { PT _ (TS _ 33) }
- 'while' { PT _ (TS _ 34) }
- '{' { PT _ (TS _ 35) }
- '||' { PT _ (TS _ 36) }
- '}' { PT _ (TS _ 37) }
+ '.' { PT _ (TS _ 13) }
+ '/' { PT _ (TS _ 14) }
+ ':' { PT _ (TS _ 15) }
+ ';' { PT _ (TS _ 16) }
+ '<' { PT _ (TS _ 17) }
+ '<=' { PT _ (TS _ 18) }
+ '=' { PT _ (TS _ 19) }
+ '==' { PT _ (TS _ 20) }
+ '>' { PT _ (TS _ 21) }
+ '>=' { PT _ (TS _ 22) }
+ '[' { PT _ (TS _ 23) }
+ '[]' { PT _ (TS _ 24) }
+ ']' { PT _ (TS _ 25) }
+ 'boolean' { PT _ (TS _ 26) }
+ 'double' { PT _ (TS _ 27) }
+ 'else' { PT _ (TS _ 28) }
+ 'false' { PT _ (TS _ 29) }
+ 'for' { PT _ (TS _ 30) }
+ 'if' { PT _ (TS _ 31) }
+ 'int' { PT _ (TS _ 32) }
+ 'length' { PT _ (TS _ 33) }
+ 'new' { PT _ (TS _ 34) }
+ 'return' { PT _ (TS _ 35) }
+ 'string' { PT _ (TS _ 36) }
+ 'true' { PT _ (TS _ 37) }
+ 'void' { PT _ (TS _ 38) }
+ 'while' { PT _ (TS _ 39) }
+ '{' { PT _ (TS _ 40) }
+ '||' { PT _ (TS _ 41) }
+ '}' { PT _ (TS _ 42) }
 
 L_ident  { PT _ (TV $$) }
 L_integ  { PT _ (TI $$) }
@@ -111,6 +116,8 @@ Stmt : ';' { Empty }
   | 'if' '(' Expr ')' Stmt { Cond $3 $5 }
   | 'if' '(' Expr ')' Stmt 'else' Stmt { CondElse $3 $5 $7 }
   | 'while' '(' Expr ')' Stmt { While $3 $5 }
+  | Ident '[' Expr ']' '=' Expr ';' { ArrAss $1 $3 $6 }
+  | 'for' '(' Type Ident ':' Expr ')' Stmt { For $3 $4 $6 $8 }
   | Expr ';' { SExp $1 }
 
 
@@ -129,6 +136,7 @@ Type : 'int' { Int }
   | 'double' { Doub }
   | 'boolean' { Bool }
   | 'void' { Void }
+  | Type '[]' { Array $1 }
 
 
 ListType :: { [Type] }
@@ -149,7 +157,9 @@ Expr6 : Ident { EVar $1 }
 
 
 Expr5 :: { Expr }
-Expr5 : '-' Expr6 { Neg $2 } 
+Expr5 : Expr6 '.' 'length' { ELength $1 } 
+  | Ident '[' Expr ']' { EIndex $1 $3 }
+  | '-' Expr6 { Neg $2 }
   | '!' Expr6 { Not $2 }
   | Expr6 { $1 }
 
@@ -161,6 +171,7 @@ Expr4 : Expr4 MulOp Expr5 { EMul $1 $2 $3 }
 
 Expr3 :: { Expr }
 Expr3 : Expr3 AddOp Expr4 { EAdd $1 $2 $3 } 
+  | 'new' Type '[' Expr ']' { ENew $2 $4 }
   | Expr4 { $1 }
 
 

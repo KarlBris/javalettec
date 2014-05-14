@@ -123,6 +123,8 @@ instance Print Stmt where
    Cond expr stmt -> prPrec i 0 (concatD [doc (showString "if") , doc (showString "(") , prt 0 expr , doc (showString ")") , prt 0 stmt])
    CondElse expr stmt0 stmt -> prPrec i 0 (concatD [doc (showString "if") , doc (showString "(") , prt 0 expr , doc (showString ")") , prt 0 stmt0 , doc (showString "else") , prt 0 stmt])
    While expr stmt -> prPrec i 0 (concatD [doc (showString "while") , doc (showString "(") , prt 0 expr , doc (showString ")") , prt 0 stmt])
+   ArrAss id expr0 expr -> prPrec i 0 (concatD [prt 0 id , doc (showString "[") , prt 0 expr0 , doc (showString "]") , doc (showString "=") , prt 0 expr , doc (showString ";")])
+   For type' id expr stmt -> prPrec i 0 (concatD [doc (showString "for") , doc (showString "(") , prt 0 type' , prt 0 id , doc (showString ":") , prt 0 expr , doc (showString ")") , prt 0 stmt])
    SExp expr -> prPrec i 0 (concatD [prt 0 expr , doc (showString ";")])
 
   prtList es = case es of
@@ -144,6 +146,7 @@ instance Print Type where
    Doub  -> prPrec i 0 (concatD [doc (showString "double")])
    Bool  -> prPrec i 0 (concatD [doc (showString "boolean")])
    Void  -> prPrec i 0 (concatD [doc (showString "void")])
+   Array type' -> prPrec i 0 (concatD [prt 0 type' , doc (showString "[]")])
    Fun type' types -> prPrec i 0 (concatD [prt 0 type' , doc (showString "(") , prt 0 types , doc (showString ")")])
    String  -> prPrec i 0 (concatD [doc (showString "string")])
 
@@ -161,10 +164,13 @@ instance Print Expr where
    ELitFalse  -> prPrec i 6 (concatD [doc (showString "false")])
    EApp id exprs -> prPrec i 6 (concatD [prt 0 id , doc (showString "(") , prt 0 exprs , doc (showString ")")])
    EString str -> prPrec i 6 (concatD [prt 0 str])
+   ELength expr -> prPrec i 5 (concatD [prt 6 expr , doc (showString ".") , doc (showString "length")])
+   EIndex id expr -> prPrec i 5 (concatD [prt 0 id , doc (showString "[") , prt 0 expr , doc (showString "]")])
    Neg expr -> prPrec i 5 (concatD [doc (showString "-") , prt 6 expr])
    Not expr -> prPrec i 5 (concatD [doc (showString "!") , prt 6 expr])
    EMul expr0 mulop expr -> prPrec i 4 (concatD [prt 4 expr0 , prt 0 mulop , prt 5 expr])
    EAdd expr0 addop expr -> prPrec i 3 (concatD [prt 3 expr0 , prt 0 addop , prt 4 expr])
+   ENew type' expr -> prPrec i 3 (concatD [doc (showString "new") , prt 0 type' , doc (showString "[") , prt 0 expr , doc (showString "]")])
    ERel expr0 relop expr -> prPrec i 2 (concatD [prt 2 expr0 , prt 0 relop , prt 3 expr])
    EAnd expr0 expr -> prPrec i 1 (concatD [prt 2 expr0 , doc (showString "&&") , prt 1 expr])
    EOr expr0 expr -> prPrec i 0 (concatD [prt 1 expr0 , doc (showString "||") , prt 0 expr])

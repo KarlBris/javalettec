@@ -101,6 +101,20 @@ checkStmt (Ass ident expr) = do
                       "expected " ++ show declaredType ++ ", got " ++ show inferredType
   return (Ass ident typedExpr)
 
+checkStmt (ArrAss ident indexExpr rightExpr) = do
+  typedIndexExpr@(ETyped _ inferredIndex) <- inferExpr indexExpr
+  typedRight@(ETyped _ inferredRight) <- inferExpr rightExpr
+
+  t <- lookupVar ident
+  assert (isArray t) $ "Attempt to index non-array variable " ++ show ident
+  assert (inferredIndex == Int) $ "Attempt to access non-integer (" ++ 
+      show inferredIndex ++ ") index of " ++ show ident
+  let (Array elemT) = t in
+    assert (elemT == inferredRight) $ "Invalid types in array assignment: " ++
+      "got " ++ show inferredRight ++ ", expected " ++ show elemT
+
+  return (ArrAss ident typedIndexExpr typedRight)
+
 checkStmt s@(Incr ident) = do
   t <- lookupVar ident
   assert (t == Int) $ "Invalid increment: " ++
@@ -178,6 +192,20 @@ checkStmt (While expr stmt) = do
   
   return (While typedExpr typedStmt)
 
+checkStmt (For t var expr stmt) = do
+  typedExpr@(ETyped _ inferredType) <- inferExpr expr
+  assert (isArray inferredType) "Attempt to iterate over non-array"
+  let (Array inferredAType) = inferredType in
+    assert (inferredAType == t) $ "Type mis-match in For-loop: " ++
+      show t ++ " can't bind " ++ show inferredType
+
+  enterScope
+  addVar var t
+  typedStmt <- checkStmt stmt
+  exitScope
+
+  return (For t var typedExpr typedStmt)
+
 checkStmt (SExp expr) = do
   typedExpr <- inferExpr expr
   return $ SExp typedExpr
@@ -200,6 +228,10 @@ getLiteralBool (ELitTrue)  = return True
 getLiteralBool (ELitFalse) = return False
 getLiteralBool _ = fail "Non-literal expression"
 
+
+isArray :: Type -> Bool
+isArray (Array _) = True
+isArray _         = False
 
 checkItem :: Type -> Item -> CheckM Item
 checkItem t (NoInit ident) = do
@@ -315,6 +347,31 @@ inferExpr (EOr expr1 expr2) = do
   assert (t1 == t2) errmsg
   assert (t1 == Bool) errmsg
   return $ ETyped (EOr typedExpr1 typedExpr2) t1
+
+
+-- Array expressions
+
+inferExpr (EIndex ident expr) = do
+  t <- lookupVar ident
+  assert (isArray t) "Attempt to index non-array"
+
+  typedExpr@(ETyped _ inferredType) <- inferExpr expr
+  assert (inferredType == Int) $ "Attempt to access non-integer index"
+
+  let (Array elemType) = t
+  return $ ETyped (EIndex ident typedExpr) elemType
+
+inferExpr (ENew t expr) = do
+  typedExpr@(ETyped _ inferredType) <- inferExpr expr
+  assert (inferredType == Int) "Array length must be integer"
+
+  return $ ETyped (ENew t typedExpr) (Array t)
+
+inferExpr (ELength expr) = do
+  typedExpr@(ETyped _ inferredType) <- inferExpr expr
+  assert (isArray inferredType) "Attempt to get length of non-array"
+
+  return $ ETyped (ELength typedExpr) Int
 
 inferExpr _ = fail "CRITICAL: Attempting to infer already typed expression"
 

@@ -52,7 +52,8 @@ The reserved words used in Grammar are the following: \\
 
 \begin{tabular}{lll}
 {\reserved{boolean}} &{\reserved{double}} &{\reserved{else}} \\
-{\reserved{false}} &{\reserved{if}} &{\reserved{int}} \\
+{\reserved{false}} &{\reserved{for}} &{\reserved{if}} \\
+{\reserved{int}} &{\reserved{length}} &{\reserved{new}} \\
 {\reserved{return}} &{\reserved{string}} &{\reserved{true}} \\
 {\reserved{void}} &{\reserved{while}} & \\
 \end{tabular}\\
@@ -63,12 +64,13 @@ The symbols used in Grammar are the following: \\
 {\symb{(}} &{\symb{)}} &{\symb{,}} \\
 {\symb{\{}} &{\symb{\}}} &{\symb{;}} \\
 {\symb{{$=$}}} &{\symb{{$+$}{$+$}}} &{\symb{{$-$}{$-$}}} \\
-{\symb{{$-$}}} &{\symb{!}} &{\symb{\&\&}} \\
-{\symb{{$|$}{$|$}}} &{\symb{[}} &{\symb{:}} \\
-{\symb{]}} &{\symb{{$+$}}} &{\symb{*}} \\
-{\symb{/}} &{\symb{\%}} &{\symb{{$<$}}} \\
-{\symb{{$<$}{$=$}}} &{\symb{{$>$}}} &{\symb{{$>$}{$=$}}} \\
-{\symb{{$=$}{$=$}}} &{\symb{!{$=$}}} & \\
+{\symb{[}} &{\symb{]}} &{\symb{:}} \\
+{\symb{[]}} &{\symb{.}} &{\symb{{$-$}}} \\
+{\symb{!}} &{\symb{\&\&}} &{\symb{{$|$}{$|$}}} \\
+{\symb{{$+$}}} &{\symb{*}} &{\symb{/}} \\
+{\symb{\%}} &{\symb{{$<$}}} &{\symb{{$<$}{$=$}}} \\
+{\symb{{$>$}}} &{\symb{{$>$}{$=$}}} &{\symb{{$=$}{$=$}}} \\
+{\symb{!{$=$}}} & & \\
 \end{tabular}\\
 
 \subsection*{Comments}
@@ -124,6 +126,8 @@ All other symbols are terminals.\\
  & {\delimit}  &{\terminal{if}} {\terminal{(}} {\nonterminal{Expr}} {\terminal{)}} {\nonterminal{Stmt}}  \\
  & {\delimit}  &{\terminal{if}} {\terminal{(}} {\nonterminal{Expr}} {\terminal{)}} {\nonterminal{Stmt}} {\terminal{else}} {\nonterminal{Stmt}}  \\
  & {\delimit}  &{\terminal{while}} {\terminal{(}} {\nonterminal{Expr}} {\terminal{)}} {\nonterminal{Stmt}}  \\
+ & {\delimit}  &{\nonterminal{Ident}} {\terminal{[}} {\nonterminal{Expr}} {\terminal{]}} {\terminal{{$=$}}} {\nonterminal{Expr}} {\terminal{;}}  \\
+ & {\delimit}  &{\terminal{for}} {\terminal{(}} {\nonterminal{Type}} {\nonterminal{Ident}} {\terminal{:}} {\nonterminal{Expr}} {\terminal{)}} {\nonterminal{Stmt}}  \\
  & {\delimit}  &{\nonterminal{Expr}} {\terminal{;}}  \\
 \end{tabular}\\
 
@@ -142,6 +146,7 @@ All other symbols are terminals.\\
  & {\delimit}  &{\terminal{double}}  \\
  & {\delimit}  &{\terminal{boolean}}  \\
  & {\delimit}  &{\terminal{void}}  \\
+ & {\delimit}  &{\nonterminal{Type}} {\terminal{[]}}  \\
 \end{tabular}\\
 
 \begin{tabular}{lll}
@@ -162,7 +167,9 @@ All other symbols are terminals.\\
 \end{tabular}\\
 
 \begin{tabular}{lll}
-{\nonterminal{Expr5}} & {\arrow}  &{\terminal{{$-$}}} {\nonterminal{Expr6}}  \\
+{\nonterminal{Expr5}} & {\arrow}  &{\nonterminal{Expr6}} {\terminal{.}} {\terminal{length}}  \\
+ & {\delimit}  &{\nonterminal{Ident}} {\terminal{[}} {\nonterminal{Expr}} {\terminal{]}}  \\
+ & {\delimit}  &{\terminal{{$-$}}} {\nonterminal{Expr6}}  \\
  & {\delimit}  &{\terminal{!}} {\nonterminal{Expr6}}  \\
  & {\delimit}  &{\nonterminal{Expr6}}  \\
 \end{tabular}\\
@@ -174,6 +181,7 @@ All other symbols are terminals.\\
 
 \begin{tabular}{lll}
 {\nonterminal{Expr3}} & {\arrow}  &{\nonterminal{Expr3}} {\nonterminal{AddOp}} {\nonterminal{Expr4}}  \\
+ & {\delimit}  &{\terminal{new}} {\nonterminal{Type}} {\terminal{[}} {\nonterminal{Expr}} {\terminal{]}}  \\
  & {\delimit}  &{\nonterminal{Expr4}}  \\
 \end{tabular}\\
 

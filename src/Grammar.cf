@@ -46,6 +46,10 @@ CondElse.  Stmt ::= "if" "(" Expr ")" Stmt "else" Stmt  ;
 
 While.     Stmt ::= "while" "(" Expr ")" Stmt ;
 
+ArrAss.    Stmt ::= Ident "[" Expr "]" "=" Expr ";" ;
+
+For.       Stmt ::= "for" "(" Type Ident ":" Expr ")" Stmt ;
+
 SExp.      Stmt ::= Expr  ";" ;
 
 -- Types ---------------------------------------------------
@@ -58,12 +62,15 @@ Bool.      Type ::= "boolean" ;
 
 Void.      Type ::= "void" ;
 
+Array.     Type ::= Type "[]" ;
+
 internal   Fun. Type ::= Type "(" [Type] ")" ;
 internal   String. Type ::= "string" ;
 
 separator  Type "," ;
 
 -- Expressions ---------------------------------------------
+
 
 EVar.      Expr6 ::= Ident ;
 
@@ -79,6 +86,10 @@ EApp.      Expr6 ::= Ident "(" [Expr] ")" ;
 
 EString.   Expr6 ::= String ;
 
+ELength.   Expr5 ::= Expr6 "." "length" ;
+
+EIndex.    Expr5 ::= Ident "[" Expr "]" ;
+
 Neg.       Expr5 ::= "-" Expr6 ;
 
 Not.       Expr5 ::= "!" Expr6 ;
@@ -86,6 +97,8 @@ Not.       Expr5 ::= "!" Expr6 ;
 EMul.      Expr4 ::= Expr4 MulOp Expr5 ;
 
 EAdd.      Expr3 ::= Expr3 AddOp Expr4 ;
+
+ENew.      Expr3 ::= "new" Type "[" Expr "]" ;
 
 ERel.      Expr2 ::= Expr2 RelOp Expr3 ;
 

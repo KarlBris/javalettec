@@ -32,6 +32,8 @@ data Stmt =
  | Cond Expr Stmt
  | CondElse Expr Stmt Stmt
  | While Expr Stmt
+ | ArrAss Ident Expr Expr
+ | For Type Ident Expr Stmt
  | SExp Expr
   deriving (Eq,Ord,Show)
 
@@ -45,6 +47,7 @@ data Type =
  | Doub
  | Bool
  | Void
+ | Array Type
  | Fun Type [Type]
  | String
   deriving (Eq,Ord,Show)
@@ -57,10 +60,13 @@ data Expr =
  | ELitFalse
  | EApp Ident [Expr]
  | EString String
+ | ELength Expr
+ | EIndex Ident Expr
  | Neg Expr
  | Not Expr
  | EMul Expr MulOp Expr
  | EAdd Expr AddOp Expr
+ | ENew Type Expr
  | ERel Expr RelOp Expr
  | EAnd Expr Expr
  | EOr Expr Expr

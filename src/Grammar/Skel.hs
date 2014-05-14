@@ -47,6 +47,8 @@ transStmt x = case x of
   Cond expr stmt  -> failure x
   CondElse expr stmt1 stmt2  -> failure x
   While expr stmt  -> failure x
+  ArrAss id expr1 expr2  -> failure x
+  For type' id expr stmt  -> failure x
   SExp expr  -> failure x
 
 
@@ -62,6 +64,7 @@ transType x = case x of
   Doub  -> failure x
   Bool  -> failure x
   Void  -> failure x
+  Array type'  -> failure x
   Fun type' types  -> failure x
   String  -> failure x
 
@@ -75,10 +78,13 @@ transExpr x = case x of
   ELitFalse  -> failure x
   EApp id exprs  -> failure x
   EString str  -> failure x
+  ELength expr  -> failure x
+  EIndex id expr  -> failure x
   Neg expr  -> failure x
   Not expr  -> failure x
   EMul expr1 mulop2 expr3  -> failure x
   EAdd expr1 addop2 expr3  -> failure x
+  ENew type' expr  -> failure x
   ERel expr1 relop2 expr3  -> failure x
   EAnd expr1 expr2  -> failure x
   EOr expr1 expr2  -> failure x
