@@ -141,18 +141,9 @@ checkStmt VRet = do
   assert (t == Void) $ "Invalid empty return for function of type " ++ show t
   return VRet
 
-checkStmt (Cond expr stmt) = do
-  alreadyReturned <- use fnReturned -- save current value of fnReturned
-  fnReturned .= False
-
-  typedExpr@(ETyped _ t) <- inferExpr expr
-  assert (t == Bool) $ "Non-bool condition to if-statement: " ++ show t
-  typedStmt <- checkStmt stmt
-  didReturn <- use fnReturned
-
-  (fnReturned .=) $ alreadyReturned || (didReturn && isLiterallyTrue typedExpr)
-
-  return (Cond typedExpr typedStmt)
+checkStmt (While expr stmt) = checkCondLike While expr stmt "While"
+  
+checkStmt (Cond expr stmt) = checkCondLike Cond expr stmt "If"
 
 checkStmt (CondElse expr stmt1 stmt2) = do
   alreadyReturned <- use fnReturned -- save current value of fnReturned
@@ -175,23 +166,6 @@ checkStmt (CondElse expr stmt1 stmt2) = do
 
   return (CondElse typedExpr stmt1' stmt2')
 
-checkStmt (While expr stmt) = do
-  alreadyReturned <- use fnReturned -- save current value of fnReturned
-  fnReturned .= False
-
-  typedExpr@(ETyped _ t) <- inferExpr expr
-  assert (t == Bool) $
-      "Non-bool condition (" ++
-      show t ++
-      ") to while-statement: " ++
-      show expr
-  typedStmt <- checkStmt stmt
-
-  didReturn <- use fnReturned
-  (fnReturned .=) $ alreadyReturned || (didReturn && isLiterallyTrue typedExpr)
-  
-  return (While typedExpr typedStmt)
-
 checkStmt (For t var expr stmt) = do
   typedExpr@(ETyped _ inferredType) <- inferExpr expr
   assert (isArray inferredType) "Attempt to iterate over non-array"
@@ -209,6 +183,24 @@ checkStmt (For t var expr stmt) = do
 checkStmt (SExp expr) = do
   typedExpr <- inferExpr expr
   return $ SExp typedExpr
+
+checkCondLike :: (Expr -> Stmt -> Stmt) -> Expr -> Stmt -> String -> CheckM Stmt
+checkCondLike constr expr stmt name = do
+  alreadyReturned <- use fnReturned -- save current value of fnReturned
+  fnReturned .= False
+
+  typedExpr@(ETyped _ t) <- inferExpr expr
+  assert (t == Bool) $
+      "Non-bool condition (" ++
+      show t ++
+      ") to " ++ name ++ "-statement: " ++
+      show expr
+  typedStmt <- checkStmt stmt
+
+  didReturn <- use fnReturned
+  (fnReturned .=) $ alreadyReturned || (didReturn && isLiterallyTrue typedExpr)
+  
+  return (constr typedExpr typedStmt)
 
 
 isLiterallyTrue :: Expr -> Bool

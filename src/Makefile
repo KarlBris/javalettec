@@ -22,6 +22,6 @@ clean:
 	-rm -f ../jlc
 	-rm -f *.out
 	-rm -rf tmp
-	-rmf -f Grammar/Test
+	-rm -f Grammar/Test
 distclean: clean
 	
