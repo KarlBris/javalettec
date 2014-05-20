@@ -6,3 +6,4 @@ jlc
 *.bc
 *.ll
 graderTestSuite
+tmp/

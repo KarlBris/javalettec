@@ -24,7 +24,6 @@ data Env = Env {
 
   _stringLiterals :: [String],
   _llvmNames      :: [M.Map String String],
-  _lastStmtStack  :: [Bool],
   _arrayTypes     :: [Type]
 } deriving Show
 
@@ -39,7 +38,6 @@ emptyEnv = Env {
 
   _stringLiterals = [],
   _llvmNames = [],
-  _lastStmtStack = [],
   _arrayTypes = []
 }
 
@@ -91,6 +89,7 @@ compileTopDefs (FnDef typ (Ident name) args block : rest) = do
     compileBlock block
 
     when (typ == Void) $ emitInstr "ret void" -- Catch that implicit return
+    emitInstr "unreachable"
 
     emit "}"
 
@@ -123,9 +122,7 @@ makeLLVMType t         = error $ "makeLLVMType lacks implementation for " ++ sho
 
 compileBlock :: Block -> GenM ()
 compileBlock (Block stmts) =
-  scoped $ forM_ stmts $ \stmt -> if stmt == last stmts
-    then withLastStmt stmt
-    else withInitStmt stmt
+  scoped $ mapM_ compileStmt stmts
 
 compileStmt :: Stmt -> GenM ()
 compileStmt s = case s of
@@ -191,8 +188,6 @@ compileStmt s = case s of
     emitInstr $ "br label %" ++ nextLbl
 
     emit $ nextLbl ++ ":"
-    unreachable <- atEnd
-    when unreachable $ emitInstr "unreachable"
   CondElse expr stmt1 stmt2 -> do
     lblIf <- newLabel
     lblElse <- newLabel
@@ -210,9 +205,6 @@ compileStmt s = case s of
     emitInstr $ "br label %" ++ nextLbl
 
     emit $ nextLbl ++ ":"
-    unreachable <- atEnd
-    when unreachable $ emitInstr "unreachable"
-
   While expr stmt -> do
     lblBegin <- newLabel
     lblLoop <- newLabel
@@ -229,9 +221,6 @@ compileStmt s = case s of
     emitInstr $ "br label %" ++ lblBegin
 
     emit $ lblNext ++ ":"
-    unreachable <- atEnd
-    when unreachable $ emitInstr "unreachable"
-
   For t (Ident ident) expr stmt -> do
     let llvmT     = makeLLVMType (Array t)
     let llvmElemT = makeLLVMType t
@@ -303,8 +292,6 @@ compileStmt s = case s of
 
     emitInstr $ "br label %" ++ lblBegin
     emit $ lblNext ++ ":"
-    
-
   ArrAss (Ident name) indexExpr valueExpr@(ETyped _ t) -> do
     let llvmT     = makeLLVMType (Array t)
     let llvmElemT = makeLLVMType t
@@ -334,7 +321,6 @@ compileStmt s = case s of
 
     -- Store computed value in elemented pointer
     store t valueExprReg elemPtrReg
-
   SExp expr ->
     case expr of
       ETyped app@(EApp _ _) t -> do
@@ -709,22 +695,3 @@ scoped fn = do
   value <- fn
   llvmNames %= tail
   return value
-
-withLastStmt :: Stmt -> GenM ()
-withLastStmt stmt = do
-  lastStmtStack %= (True:)
-  value <- compileStmt stmt
-  lastStmtStack %= tail
-  return value
-
-withInitStmt :: Stmt -> GenM ()
-withInitStmt stmt = do
-  lastStmtStack %= (False:)
-  value <- compileStmt stmt
-  lastStmtStack %= tail
-  return value
-
-atEnd :: GenM Bool
-atEnd = do
-  st <- use lastStmtStack
-  return $ head st
