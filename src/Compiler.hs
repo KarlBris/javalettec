@@ -24,7 +24,7 @@ readAndCompile sourcePath = do
   compile (Just sourcePath) source
 
 compile :: Maybe String -> String -> IO ()
-compile mbSrcFile source = do
+compile mbSrcFile source =
   case process source of
     Bad s    -> do
       hPutStrLn stderr "ERROR"
@@ -46,5 +46,4 @@ process source = do
   let tokens = myLexer source
   tree  <- pProgram tokens
   typed_tree <- typecheck tree
-  --return $ show typed_tree
   compilellvm typed_tree

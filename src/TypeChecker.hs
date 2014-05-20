@@ -361,7 +361,7 @@ inferExpr (EIndex ident expr) = do
   assert (isArray t) "Attempt to index non-array"
 
   typedExpr@(ETyped _ inferredType) <- inferExpr expr
-  assert (inferredType == Int) $ "Attempt to access non-integer index"
+  assert (inferredType == Int) "Attempt to access non-integer index"
 
   let (Array elemType) = t
   return $ ETyped (EIndex ident typedExpr) elemType
