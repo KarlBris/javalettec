@@ -1,9 +1,12 @@
-SOURCES = $(wildcard *.hs) Grammar/
+SOURCES = $(wildcard *.hs) build/Grammar
 
 all: ../jlc
 
 ../jlc: $(SOURCES)
 	ghc -Wall --make Compiler.hs -o ../jlc -odir build -hidir build
+
+build/Grammar: Grammar/
+	ghc Grammar/*.hs -odir build -hidir build
 
 Grammar/: Grammar.cf
 	bnfc -d Grammar.cf
@@ -16,9 +19,9 @@ Grammar/: Grammar.cf
 .PHONY: clean distclean test
 clean:
 	-rm -rf build
-	-rm -f jlc
-	-rm -f a.out
+	-rm -f ../jlc
+	-rm -f *.out
 	-rm -rf tmp
-	-rm -rf graderTestSuite
+	-rmf -f Grammar/Test
 distclean: clean
 	

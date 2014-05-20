@@ -7,3 +7,4 @@ jlc
 *.ll
 graderTestSuite
 tmp/
+src/Grammar/Test

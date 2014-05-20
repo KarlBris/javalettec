@@ -5,8 +5,8 @@ jlc: src/*
 
 clean: 
 	cd src; make clean
-	-rm -rf graderTestSuite
-	-rm -f jlc
+	-rm -rf graderTestSuite/
+	-rm -f tmp/
 
 grade: jlc
 	cd tests; make && ./Grade -b LLVM -x arrays1 . ..
@@ -21,6 +21,7 @@ test: jlc
 	echo "\n\n######### tmp/test.llvm\n" && cat tmp/test.llvm && \
 	opt -std-compile-opts -mem2reg tmp/test.llvm > tmp/test.bc && \
   llvm-dis tmp/test.bc && echo "\n\n######### tmp/test.ll\n" && cat tmp/test.ll
+  @rm -rf tmp/
 
 package:
 	cd src && make jlc distclean
