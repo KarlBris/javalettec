@@ -498,65 +498,9 @@ compileExpr resultReg ex = case ex of
     setCurrentExpType typ
     compileBinaryOp (getRelOp relOp) e1 e2 resultReg
 
-  EAnd expr1 expr2 -> do
-    exprReg1 <- createRegister
-    exprReg2 <- createRegister
-
-    cmpMem1 <- createRegister
-    cmpMem2 <- createRegister
-    cmpReg1 <- createRegister
-    cmpReg2 <- createRegister
-
-    lblEval <- newLabel
-    lblEnd <- newLabel
-
-    emitInstr $ "%" ++ cmpMem1 ++ " = alloca i1"
-    emitInstr $ "%" ++ cmpMem2 ++ " = alloca i1"
-    emitInstr $ "store i1 false, i1* %" ++ cmpMem2
-
-    compileExpr exprReg1 expr1
-    store Bool exprReg1 cmpMem1
-    emitInstr $ "br i1 %" ++ exprReg1 ++ ", label %" ++ lblEval ++ ", label %" ++ lblEnd
-
-    emit $ lblEval ++ ":"
-    compileExpr exprReg2 expr2
-    store Bool exprReg2 cmpMem2
-    emitInstr $ "br label %" ++ lblEnd
-
-    emit $ lblEnd ++ ":"
-    emitInstr $ "%" ++ cmpReg1 ++ " = load i1* %" ++ cmpMem1
-    emitInstr $ "%" ++ cmpReg2 ++ " = load i1* %" ++ cmpMem2
-    emitInstr $ "%" ++ resultReg ++ " = and i1 %" ++ cmpReg1 ++ ", %" ++ cmpReg2 
-
-  EOr expr1 expr2 -> do
-    exprReg1 <- createRegister
-    exprReg2 <- createRegister
-
-    cmpMem1 <- createRegister
-    cmpMem2 <- createRegister
-    cmpReg1 <- createRegister
-    cmpReg2 <- createRegister
-
-    lblEval <- newLabel
-    lblEnd <- newLabel
-
-    emitInstr $ "%" ++ cmpMem1 ++ " = alloca i1"
-    emitInstr $ "%" ++ cmpMem2 ++ " = alloca i1"
-    emitInstr $ "store i1 false, i1* %" ++ cmpMem2
-
-    compileExpr exprReg1 expr1
-    store Bool exprReg1 cmpMem1
-    emitInstr $ "br i1 %" ++ exprReg1 ++ ", label %" ++ lblEnd ++ ", label %" ++ lblEval
-
-    emit $ lblEval ++ ":"
-    compileExpr exprReg2 expr2
-    store Bool exprReg2 cmpMem2
-    emitInstr $ "br label %" ++ lblEnd
-
-    emit $ lblEnd ++ ":"
-    emitInstr $ "%" ++ cmpReg1 ++ " = load i1* %" ++ cmpMem1
-    emitInstr $ "%" ++ cmpReg2 ++ " = load i1* %" ++ cmpMem2
-    emitInstr $ "%" ++ resultReg ++ " = or i1 %" ++ cmpReg1 ++ ", %" ++ cmpReg2 
+  EAnd expr1 expr2 -> compileAndOr True expr1 expr2 resultReg
+  EOr  expr1 expr2 -> compileAndOr False expr1 expr2 resultReg
+    
 
   ETyped expr typ -> do
     setCurrentExpType typ
@@ -574,6 +518,42 @@ compileBinaryOp operatorFor expr1 expr2 resultReg = do
     emitInstr $ "%" ++ resultReg ++ " = " ++ 
         operatorFor t ++ " " ++ makeLLVMType t ++ 
         " %" ++ exprReg1 ++ ", %" ++ exprReg2
+
+compileAndOr :: Bool -> Expr -> Expr -> String -> GenM ()
+compileAndOr isAnd expr1 expr2 resultReg = do
+    exprReg1 <- createRegister
+    exprReg2 <- createRegister
+
+    cmpMem1 <- createRegister
+    cmpMem2 <- createRegister
+    cmpReg1 <- createRegister
+    cmpReg2 <- createRegister
+
+    lblEval <- newLabel
+    lblEnd  <- newLabel
+
+    emitInstr $ "%" ++ cmpMem1 ++ " = alloca i1"
+    emitInstr $ "%" ++ cmpMem2 ++ " = alloca i1"
+    emitInstr $ "store i1 false, i1* %" ++ cmpMem2
+
+    compileExpr exprReg1 expr1
+    store Bool exprReg1 cmpMem1
+
+    let lblTrue = if isAnd then lblEval else lblEnd
+    let lblFalse = if isAnd then lblEnd else lblEval
+    emitInstr $ "br i1 %" ++ exprReg1 ++ ", label %" ++ lblTrue ++ ", label %" ++ lblFalse
+
+    emit $ lblEval ++ ":"
+    compileExpr exprReg2 expr2
+    store Bool exprReg2 cmpMem2
+    emitInstr $ "br label %" ++ lblEnd
+
+    emit $ lblEnd ++ ":"
+    emitInstr $ "%" ++ cmpReg1 ++ " = load i1* %" ++ cmpMem1
+    emitInstr $ "%" ++ cmpReg2 ++ " = load i1* %" ++ cmpMem2
+    emitInstr $ "%" ++ resultReg ++ " = " ++ 
+      (if isAnd then "and" else "or") ++ 
+      " i1 %" ++ cmpReg1 ++ ", %" ++ cmpReg2 
 
 sizeof :: String -> String
 sizeof t = "ptrtoint ("++t++"* getelementptr ("++t++"* null, i32 1) to i32)"
