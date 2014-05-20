@@ -235,10 +235,12 @@ isArray _         = False
 
 checkItem :: Type -> Item -> CheckM Item
 checkItem t (NoInit ident) = do
+  checkType t
   addVar ident t
   return $ NoInit ident
 
 checkItem declaredType (Init ident expr) = do
+  checkType declaredType
   typedExpr@(ETyped _ inferredType) <- inferExpr expr
   assert (declaredType == inferredType) $ 
       "Invalid variale initialization: " ++
@@ -246,6 +248,9 @@ checkItem declaredType (Init ident expr) = do
   addVar ident declaredType
   return $ Init ident typedExpr
 
+checkType :: Type -> CheckM ()
+checkType (Array (Array t)) = fail $ "Illegal type: " ++ show t ++ "[][]"
+checkType _ = return ()
 
 inferExpr :: Expr -> CheckM Expr
 

@@ -1,0 +1,18 @@
+# Building on remote1.student.chalmers.se (or equivalent)
+
+The only dependency is lens. Install it with:
+
+```
+cabal install --user --reorder-goals lens
+```
+
+If lens already installed, but the compile still fails, try 
+
+```
+ghc-pkg list
+```
+
+If the `mtl` package appears in both the system list and the user list, 
+there is a version conflict due to a (known) cabal bug, 
+and some clever tinkering with ghc-pkg unregister or a 
+deletion of .ghc/* and .cabal/lib is in order.

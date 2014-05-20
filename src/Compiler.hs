@@ -1,3 +1,5 @@
+module Main where
+
 import System.Environment (getArgs)
 import System.IO (hPutStrLn, stderr)
 import System.FilePath.Posix (dropExtension)
@@ -26,6 +28,7 @@ compile mbSrcFile source = do
   case process source of
     Bad s    -> do
       hPutStrLn stderr "ERROR"
+      hPutStrLn stderr s
       putStrLn s
       exitWith $ ExitFailure 1
     Ok llvm -> do
@@ -43,4 +46,5 @@ process source = do
   let tokens = myLexer source
   tree  <- pProgram tokens
   typed_tree <- typecheck tree
+  --return $ show typed_tree
   compilellvm typed_tree

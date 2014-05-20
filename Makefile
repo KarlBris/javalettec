@@ -9,7 +9,7 @@ clean:
 	-rm -f jlc
 
 grade: jlc
-	cd tests; make && ./Grade -b LLVM . ..
+	cd tests; make && ./Grade -b LLVM -x arrays1 . ..
 
 # Usage: make test FILE=tests/testsuite/good/core021.jl
 test: jlc

@@ -2,11 +2,11 @@
 
 module CodeGenerator where
 
-import qualified Data.Map.Lazy as M (Map, empty, insert, lookup)
+import qualified Data.Map as M (Map, empty, insert, lookup)
 import Control.Lens (makeLenses, use, (.=), (%=), (^.), (+=))
 import Control.Monad (forM_, when, replicateM)
 import Control.Monad.State (StateT, execStateT)
-import Data.List (intercalate, )
+import Data.List (intercalate, nub)
 
 import Grammar.ErrM (Err)
 import Grammar.Abs
@@ -24,7 +24,8 @@ data Env = Env {
 
   _stringLiterals :: [String],
   _llvmNames      :: [M.Map String String],
-  _lastStmtStack  :: [Bool]
+  _lastStmtStack  :: [Bool],
+  _arrayTypes     :: [Type]
 } deriving Show
 
 emptyEnv :: Env
@@ -38,7 +39,8 @@ emptyEnv = Env {
 
   _stringLiterals = [],
   _llvmNames = [],
-  _lastStmtStack = []
+  _lastStmtStack = [],
+  _arrayTypes = []
 }
 
 makeLenses ''Env
@@ -50,16 +52,26 @@ compilellvm p = do
 
 compileProgram :: Program -> GenM ()
 compileProgram (Program topDefs) = do
+  compileTopDefs topDefs
+  c <- use code
+  code .= []
+
+  emitStringLiterals
   mapM_ emit [
     "",
     "declare void @printInt(i32)",
     "declare void @printDouble(double)",
     "declare void @printString(i8*)",
     "declare i32 @readInt()",
-    "declare double @readDouble()"
+    "declare double @readDouble()",
+    "",
+    "declare noalias i8* @calloc(i32, i32)",
+    "declare noalias i8* @malloc(i32)",
+    ""
     ]
-  compileTopDefs topDefs
-  emitStringLiterals
+  emitArrayTypes
+  
+  code %= (c++)
 
 compileTopDefs :: [TopDef] -> GenM ()
 compileTopDefs [] = return ()
@@ -101,12 +113,13 @@ compileTopDefs (FnDef typ (Ident name) args block : rest) = do
       setRegisterForName n newReg
 
 makeLLVMType :: Type -> String
-makeLLVMType Int    = "i32"
-makeLLVMType Doub   = "double"
-makeLLVMType Bool   = "i1"
-makeLLVMType Void   = "void"
-makeLLVMType String = "i8*"
-makeLLVMType t      = error $ "makeLLVMType lacks implementation for " ++ show t
+makeLLVMType Int       = "i32"
+makeLLVMType Doub      = "double"
+makeLLVMType Bool      = "i1"
+makeLLVMType Void      = "void"
+makeLLVMType String    = "i8*"
+makeLLVMType (Array t) = "%__Arr_" ++ makeLLVMType t
+makeLLVMType t         = error $ "makeLLVMType lacks implementation for " ++ show t
 
 compileBlock :: Block -> GenM ()
 compileBlock (Block stmts) =
@@ -120,16 +133,16 @@ compileStmt s = case s of
   BStmt block -> compileBlock block
   Decl t (NoInit (Ident name) : rest) -> do
     reg <- createRegisterFor name
-    let llvmType = makeLLVMType t
-    emitInstr $ "%" ++ reg ++ " = alloca " ++ llvmType
-    emitInstr $ "store " ++ llvmType ++ " " ++ initValue t ++ ", " ++ llvmType ++ "* %" ++ reg
+    let llvmT = makeLLVMType t
+    emitInstr $ "%" ++ reg ++ " = alloca " ++ llvmT
+    emitInstr $ "store " ++ llvmT ++ " " ++ initValue t ++ ", " ++ llvmT ++ "* %" ++ reg
     compileStmt (Decl t rest)
   Decl t (Init (Ident declaredName) expr : rest) -> do
-    let llvmType = makeLLVMType t
+    let llvmT = makeLLVMType t
     exprReg <- createRegister
     compileExpr exprReg expr
     reg <- createRegisterFor declaredName
-    emitInstr $ "%" ++ reg ++ " = alloca " ++ llvmType
+    emitInstr $ "%" ++ reg ++ " = alloca " ++ llvmT
     store t exprReg reg
     compileStmt (Decl t rest)
   Decl _ _ -> return ()
@@ -218,6 +231,109 @@ compileStmt s = case s of
     emit $ lblNext ++ ":"
     unreachable <- atEnd
     when unreachable $ emitInstr "unreachable"
+
+  For t (Ident ident) expr stmt -> do
+    let llvmT     = makeLLVMType (Array t)
+    let llvmElemT = makeLLVMType t
+
+    lblBegin  <- newLabel
+    lblLoop  <- newLabel
+    lblNext   <- newLabel
+
+    -- Reduce the array expression
+    arrReg <- createRegister
+    compileExpr arrReg expr
+
+    -- Coerce array to array* for getelementptr
+    objPtrReg <- createRegister
+    emitInstr $ "%" ++ objPtrReg ++ " = alloca " ++ llvmT
+    emitInstr $ "store " ++ 
+        llvmT ++ " %" ++ arrReg ++ ", " ++
+        llvmT ++ "* %" ++ objPtrReg
+
+    -- Index the length field of the array struct
+    sizePtrReg <- createRegister
+    emitInstr $ "%" ++ sizePtrReg ++ " = getelementptr " ++ llvmT ++ "* " ++
+      "%" ++ objPtrReg ++ ", i32 0, i32 0"
+
+    -- Array length now in lenReg
+    lenReg <- createRegister
+    emitInstr $ "%" ++ lenReg ++ " = load i32* %" ++ sizePtrReg 
+
+    -- Index the array field of the array struct
+    arrayPtrReg <- createRegister
+    emitInstr $ "%" ++ arrayPtrReg ++ " = getelementptr " ++ llvmT ++ "* " ++
+      "%" ++ objPtrReg ++ ", i32 0, i32 1"
+
+    -- Dereference pointer into array struct to point to the wrapped array
+    arrayDerefReg <- createRegister
+    emitInstr $ "%" ++ arrayDerefReg ++ " = load " ++ llvmElemT ++ "** %" ++ arrayPtrReg
+
+    -- Loop setup, set i = 0
+    counterReg <- createRegister
+    emitInstr $ "%" ++ counterReg ++ " = alloca i32"
+    emitInstr $ "store i32 0, i32* %" ++ counterReg
+
+    -- Loop condition checking label
+    emitInstr $ "br label %" ++ lblBegin
+    emit $ lblBegin ++ ":"
+    
+    -- Compare index with array length (i < a.length)
+    indexReg <- createRegister
+    emitInstr $ "%" ++ indexReg ++ " = load i32* %" ++ counterReg
+    condReg <- createRegister
+    emitInstr $ "%" ++ condReg ++ " = icmp slt i32 %" ++ indexReg ++ ", %" ++ lenReg
+
+    -- Loop on previous comparison
+    emitInstr $ "br i1 %" ++ condReg ++ ", label %" ++ lblLoop ++ ", label %" ++ lblNext
+    emit $ lblLoop ++ ":"
+
+    -- Increment counter (i++)
+    incrCountReg <- createRegister
+    emitInstr $ "%" ++ incrCountReg ++ " = add i32 1, %" ++ indexReg
+    emitInstr $ "store i32 %" ++ incrCountReg ++ ", i32* %" ++ counterReg
+
+    scoped $ do
+      -- Add the loop variable
+      loopVarReg <- createRegisterFor ident
+      emitInstr $ "%" ++ loopVarReg ++ " = getelementptr " ++ llvmElemT ++ "* " ++
+        "%" ++ arrayDerefReg ++ ", i32 %" ++ indexReg
+
+      scoped $ compileStmt stmt
+
+    emitInstr $ "br label %" ++ lblBegin
+    emit $ lblNext ++ ":"
+    
+
+  ArrAss (Ident name) indexExpr valueExpr@(ETyped _ t) -> do
+    let llvmT     = makeLLVMType (Array t)
+    let llvmElemT = makeLLVMType t
+
+    -- Compile index i32
+    indexReg <- createRegister
+    compileExpr indexReg indexExpr
+
+    -- Index the array struct
+    reg <- registerFor name
+    arrayPtrReg <- createRegister
+    emitInstr $ "%" ++ arrayPtrReg ++ " = getelementptr " ++ llvmT ++ "* " ++
+      "%" ++ reg ++ ", i32 0, i32 1"
+
+    -- Dereference pointer into array struct to point to the wrapped array
+    arrayDerefReg <- createRegister
+    emitInstr $ "%" ++ arrayDerefReg ++ " = load " ++ llvmElemT ++ "** %" ++ arrayPtrReg
+
+    -- Index the array
+    elemPtrReg <- createRegister
+    emitInstr $ "%" ++ elemPtrReg ++ " = getelementptr " ++ llvmElemT ++ "* " ++
+      "%" ++ arrayDerefReg ++ ", i32 %" ++ indexReg
+
+    -- Compile value expression
+    valueExprReg <- createRegister
+    compileExpr valueExprReg valueExpr
+
+    -- Store computed value in elemented pointer
+    store t valueExprReg elemPtrReg
 
   SExp expr ->
     case expr of
@@ -308,7 +424,7 @@ compileExpr resultReg ex = case ex of
     compileExpr exprReg1 expr1
     compileExpr exprReg2 expr2
     emitInstr $ "%" ++ resultReg ++ " = " ++ getRelOp typ relOp ++ " " ++ makeLLVMType typ ++ " %" ++ exprReg1 ++ ", %" ++ exprReg2
-  EAnd expr1 expr2       -> do
+  EAnd expr1 expr2 -> do
     exprReg1 <- createRegister
     exprReg2 <- createRegister
 
@@ -338,7 +454,7 @@ compileExpr resultReg ex = case ex of
     emitInstr $ "%" ++ cmpReg2 ++ " = load i1* %" ++ cmpMem2
     emitInstr $ "%" ++ resultReg ++ " = and i1 %" ++ cmpReg1 ++ ", %" ++ cmpReg2 
 
-  EOr expr1 expr2        -> do
+  EOr expr1 expr2 -> do
     exprReg1 <- createRegister
     exprReg2 <- createRegister
 
@@ -368,11 +484,104 @@ compileExpr resultReg ex = case ex of
     emitInstr $ "%" ++ cmpReg2 ++ " = load i1* %" ++ cmpMem2
     emitInstr $ "%" ++ resultReg ++ " = or i1 %" ++ cmpReg1 ++ ", %" ++ cmpReg2 
 
-  ETyped expr typ        -> do
+  ENew t expr -> do
+    let llvmT = makeLLVMType (Array t)
+    let llvmElemT = makeLLVMType t
+    addArrayType t
+
+    exprReg <- createRegister
+    compileExpr exprReg expr
+
+    -- Create the array object with a size field
+    objectReg <- createRegister
+    emitInstr $ "%" ++ objectReg ++ " = alloca " ++ llvmT
+
+    -- Create a pointer to the size field
+    sizePtrReg <- createRegister
+    emitInstr $ "%" ++ sizePtrReg ++ " = getelementptr " ++ llvmT ++ "* " ++
+      "%" ++ objectReg ++ ", i32 0, i32 0"
+
+    -- Populate size field
+    emitInstr  $ "store i32 %" ++ exprReg ++ ", i32* %" ++ sizePtrReg
+
+    -- Allocate array on heap
+    arrReg <- createRegister
+    emitInstr $ "%" ++ arrReg ++ " = call i8* @calloc(" ++ 
+        "i32 " ++ sizeof llvmT ++ ", " ++ 
+        "i32 %" ++ exprReg ++ ")"
+    
+    -- Cast calloc return type to llvmElemT* 
+    castReg <- createRegister
+    emitInstr $ "%" ++ castReg ++ 
+        " = bitcast i8* " ++ 
+        "%" ++ arrReg ++ " to " ++ llvmElemT ++ "*"
+
+    -- Get pointer to array location
+    arrPtrReg <- createRegister
+    emitInstr $ "%" ++ arrPtrReg ++ " = getelementptr " ++ llvmT ++ "* " ++
+        "%" ++ objectReg ++ ", i32 0, i32 1"
+
+    -- Store address from castReg as the new array
+    emitInstr $ "store " ++ llvmElemT ++ "* %" ++ castReg ++ ", " ++
+        llvmElemT ++ "** %" ++ arrPtrReg
+
+    emitInstr $ "%" ++ resultReg ++ " = load " ++ llvmT ++ "* %" ++ objectReg
+
+  ELength expr@(ETyped _ t) -> do
+    let llvmT = makeLLVMType t
+
+    -- Compile array expression
+    exprReg <- createRegister
+    compileExpr exprReg expr
+
+    -- Corce array to array*
+    exprPtrReg <- createRegister
+    emitInstr $ "%" ++ exprPtrReg ++ " = alloca " ++ llvmT
+    emitInstr $ "store " ++ 
+        llvmT ++ " %" ++ exprReg ++ ", " ++
+        llvmT ++ "* %" ++ exprPtrReg
+
+    -- Index length field
+    sizePtrReg <- createRegister
+    emitInstr $ "%" ++ sizePtrReg ++ " = getelementptr " ++ llvmT ++ "* " ++
+      "%" ++ exprPtrReg ++ ", i32 0, i32 0"
+    emitInstr $ "%" ++ resultReg ++ " = load i32* %" ++ sizePtrReg 
+
+  EIndex (Ident ident) indexExpr -> do
+    t <- getCurrentExpType
+    let llvmT     = makeLLVMType (Array t)
+    let llvmElemT = makeLLVMType t
+
+    variableReg <- registerFor ident
+
+    -- Compile index expression
+    indexReg <- createRegister
+    compileExpr indexReg indexExpr
+
+    -- Index into the array field of the struct
+    arrayPtrReg <- createRegister
+    emitInstr $ "%" ++ arrayPtrReg ++ " = getelementptr " ++ llvmT ++ "* " ++
+      "%" ++ variableReg ++ ", i32 0, i32 1"
+
+    -- Dereference the struct[1] pointer to get the array memory
+    arrayDerefReg <- createRegister
+    emitInstr $ "%" ++ arrayDerefReg ++ " = load " ++ llvmElemT ++ "** %" ++ arrayPtrReg
+
+    -- Index into the array memory
+    elemPtrReg <- createRegister
+    emitInstr $ "%" ++ elemPtrReg ++ " = getelementptr " ++ llvmElemT ++ "* " ++
+      "%" ++ arrayDerefReg ++ ", i32 %" ++ indexReg
+
+    emitInstr $ "%" ++ resultReg ++ " = load i32* %" ++ elemPtrReg 
+
+  ETyped expr typ -> do
     setCurrentExpType typ
     compileExpr resultReg expr
 
   expr -> fail $ "compileExpr pattern match failed on " ++ show expr
+
+sizeof :: String -> String
+sizeof t = "ptrtoint ("++t++"* getelementptr ("++t++"* null, i32 1) to i32)"
 
 getMulOp :: Type -> MulOp -> String
 getMulOp Int Times  = "mul"
@@ -413,8 +622,8 @@ initValue _ = "0"
 
 store :: Type -> String -> String -> GenM ()
 store typ src tgt = do
-  let llvmType = makeLLVMType typ
-  emitInstr $ "store " ++ llvmType ++ " %" ++ src ++ ", " ++ llvmType ++ "* %" ++ tgt
+  let llvmT = makeLLVMType typ
+  emitInstr $ "store " ++ llvmT ++ " %" ++ src ++ ", " ++ llvmT ++ "* %" ++ tgt
 
 emitInstr :: String -> GenM ()
 emitInstr s = emit $ "  " ++ s
@@ -422,10 +631,34 @@ emitInstr s = emit $ "  " ++ s
 emit :: String -> GenM ()
 emit s = code %= (s:)
 
+addStringLiteral :: String -> String -> GenM Int
+addStringLiteral stringVar string = do
+  let escapedString = string ++ "\\00"
+  let newLength = length string + 1
+  let globalString = "@" ++ stringVar ++ " = internal constant [" ++ show newLength ++ " x i8] c\"" ++ escapedString ++ "\""
+  stringLiterals %= (globalString:)
+  return newLength
+
 emitStringLiterals :: GenM ()
 emitStringLiterals = do
   literals <- use stringLiterals
-  code %= (++ literals)
+  mapM_ emit literals
+
+addArrayType :: Type -> GenM ()
+addArrayType t = arrayTypes %= (t:)
+
+emitArrayTypes :: GenM ()
+emitArrayTypes = do
+  types <- use arrayTypes
+  forM_ (nub types) $ \t -> do
+    let llvmT = makeLLVMType t
+    let typeName = makeLLVMType (Array t)
+    mapM_ emit [
+        typeName ++ " = type {",
+        "  i32,",
+        "  " ++ llvmT ++ "*",
+        "}"
+      ]
 
 createRegisterFor :: String -> GenM String
 createRegisterFor x = do 
@@ -495,11 +728,3 @@ atEnd :: GenM Bool
 atEnd = do
   st <- use lastStmtStack
   return $ head st
-
-addStringLiteral :: String -> String -> GenM Int
-addStringLiteral stringVar string = do
-  let escapedString = string ++ "\\00"
-  let newLength = length string + 1
-  let globalString = "@" ++ stringVar ++ " = internal constant [" ++ show newLength ++ " x i8] c\"" ++ escapedString ++ "\""
-  stringLiterals %= (globalString:)
-  return newLength
