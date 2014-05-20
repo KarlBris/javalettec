@@ -20,8 +20,8 @@ test: jlc
 	./jlc ${FILE} > tmp/test.llvm && \
 	echo "\n\n######### tmp/test.llvm\n" && cat tmp/test.llvm && \
 	opt -std-compile-opts -mem2reg tmp/test.llvm > tmp/test.bc && \
-  llvm-dis tmp/test.bc && echo "\n\n######### tmp/test.ll\n" && cat tmp/test.ll
-  @rm -rf tmp/
+	llvm-dis tmp/test.bc && echo "\n\n######### tmp/test.ll\n" && cat tmp/test.ll
+	@rm -rf tmp/
 
 package:
 	cd src && make jlc distclean
