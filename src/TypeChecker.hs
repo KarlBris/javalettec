@@ -289,65 +289,6 @@ inferExpr (EApp ident argexprs) = do
 inferExpr expr@(EString _) =
   return $ ETyped expr String
 
-inferExpr (Neg expr) = do
-  typedExpr@(ETyped _ t) <- inferExpr expr
-  assert (t `elem` [Int, Doub]) $"Attempt to negate non-numeric type " ++ show t
-  return $ ETyped (Neg typedExpr) t
-
-inferExpr (Not expr) = do
-  typedExpr@(ETyped _ t) <- inferExpr expr
-  assert (t == Bool) $ "Attempt to negate non-bool type " ++ show t
-  return $ ETyped (Not typedExpr) t
-
-inferExpr (EMul expr1 op expr2) = do
-  typedExpr1@(ETyped _ t1) <- inferExpr expr1
-  typedExpr2@(ETyped _ t2) <- inferExpr expr2
-  let errmsg =  "Incompatible types for operator " ++ show op ++ ": " ++
-                show t1 ++ " and " ++ show t2
-  assert (t1 == t2) errmsg
-  assert (t1 /= Doub || op /= Mod) errmsg
-  assert (t1 `elem` [Int, Doub]) errmsg
-  return $ ETyped (EMul typedExpr1 op typedExpr2) t1
-
-inferExpr (EAdd expr1 op expr2) = do
-  typedExpr1@(ETyped _ t1) <- inferExpr expr1
-  typedExpr2@(ETyped _ t2) <- inferExpr expr2
-  let errmsg =  "Incompatible types for operator " ++ show op ++ ": " ++
-                show t1 ++ " and " ++ show t2
-  assert (t1 == t2) errmsg
-  assert (t1 `elem` [Int, Doub]) errmsg
-  return $ ETyped (EAdd typedExpr1 op typedExpr2) t1
-
-inferExpr (ERel expr1 op expr2) = do
-  typedExpr1@(ETyped _ t1) <- inferExpr expr1
-  typedExpr2@(ETyped _ t2) <- inferExpr expr2
-  let errmsg =  "Incompatible types for operator " ++ show op ++ ": " ++
-                show t1 ++ " and " ++ show t2
-  assert (t1 == t2) errmsg
-  assert (t1 `elem` [Int, Doub] || (t1 == Bool && op `elem` [EQU, NE])) errmsg
-  return $ ETyped (ERel typedExpr1 op typedExpr2) Bool
-
-inferExpr (EAnd expr1 expr2) = do
-  typedExpr1@(ETyped _ t1) <- inferExpr expr1
-  typedExpr2@(ETyped _ t2) <- inferExpr expr2
-  let errmsg =  "Incompatible types for operator AND: " ++
-                show t1 ++ " and " ++ show t2
-  assert (t1 == t2) errmsg
-  assert (t1 == Bool) errmsg
-  return $ ETyped (EAnd typedExpr1 typedExpr2) t1
-
-inferExpr (EOr expr1 expr2) = do
-  typedExpr1@(ETyped _ t1) <- inferExpr expr1
-  typedExpr2@(ETyped _ t2) <- inferExpr expr2
-  let errmsg =  "Incompatible types for operator OR: " ++
-                show t1 ++ " and " ++ show t2
-  assert (t1 == t2) errmsg
-  assert (t1 == Bool) errmsg
-  return $ ETyped (EOr typedExpr1 typedExpr2) t1
-
-
--- Array expressions
-
 inferExpr (EIndex ident expr) = do
   t <- lookupVar ident
   assert (isArray t) "Attempt to index non-array"
@@ -370,7 +311,59 @@ inferExpr (ELength expr) = do
 
   return $ ETyped (ELength typedExpr) Int
 
+inferExpr (Neg expr) = do
+  typedExpr@(ETyped _ t) <- inferExpr expr
+  assert (t `elem` [Int, Doub]) $"Attempt to negate non-numeric type " ++ show t
+  return $ ETyped (Neg typedExpr) t
+
+inferExpr (Not expr) = do
+  typedExpr@(ETyped _ t) <- inferExpr expr
+  assert (t == Bool) $ "Attempt to negate non-bool type " ++ show t
+  return $ ETyped (Not typedExpr) t
+
+inferExpr (EMul expr1 op expr2) = inferBinary (flip EMul op) expr1 expr2 $ \t1 t2 -> do
+  let errmsg =  "Incompatible types for operator " ++ show op ++ ": " ++
+              show t1 ++ " and " ++ show t2
+  assert (t1 == t2) errmsg
+  assert (t1 /= Doub || op /= Mod) errmsg
+  assert (t1 `elem` [Int, Doub]) errmsg
+  return t1
+  
+inferExpr (EAdd expr1 op expr2) = inferBinary (flip EAdd op) expr1 expr2 $ \t1 t2 -> do
+  let errmsg =  "Incompatible types for operator " ++ show op ++ ": " ++
+                show t1 ++ " and " ++ show t2
+  assert (t1 == t2) errmsg
+  assert (t1 `elem` [Int, Doub]) errmsg
+  return t1
+
+inferExpr (ERel expr1 op expr2) = inferBinary (flip ERel op) expr1 expr2 $ \t1 t2 -> do
+  let errmsg =  "Incompatible types for operator " ++ show op ++ ": " ++
+                show t1 ++ " and " ++ show t2
+  assert (t1 == t2) errmsg
+  assert (t1 `elem` [Int, Doub] || (t1 == Bool && op `elem` [EQU, NE])) errmsg
+  return Bool
+
+inferExpr (EAnd expr1 expr2) = inferBoolRelExpr EAnd expr1 expr2 "AND"
+
+inferExpr (EOr expr1 expr2) = inferBoolRelExpr EOr expr1 expr2 "OR"
+
 inferExpr _ = fail "CRITICAL: Attempting to infer already typed expression"
+
+inferBinary :: (Expr -> Expr -> Expr) -> Expr -> Expr -> (Type -> Type -> CheckM Type) -> CheckM Expr
+inferBinary c expr1 expr2 checker = do
+  typedExpr1@(ETyped _ t1) <- inferExpr expr1
+  typedExpr2@(ETyped _ t2) <- inferExpr expr2
+  t <- checker t1 t2
+  return $ ETyped (c typedExpr1 typedExpr2) t
+
+inferBoolRelExpr :: (Expr -> Expr -> Expr) -> Expr -> Expr -> String -> CheckM Expr
+inferBoolRelExpr c expr1 expr2 name = inferBinary c expr1 expr2 $ \t1 t2 -> do
+  let errmsg =  "Incompatible types for operator " ++ name ++ ": " ++
+                show t1 ++ " and " ++ show t2
+  assert (t1 == t2) errmsg
+  assert (t1 == Bool) errmsg
+  return t1
+
 
 lookupVar :: Ident -> CheckM Type
 lookupVar name = do
@@ -382,7 +375,6 @@ lookupVar name = do
     recursiveLookup (s:rest) x = case lookup x s of
                               Nothing -> recursiveLookup rest x
                               Just t  -> return t
-
 
 addVar :: Ident -> Type -> CheckM ()
 addVar var t = do

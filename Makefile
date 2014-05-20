@@ -6,7 +6,7 @@ jlc: src/*
 clean: 
 	cd src; make clean
 	-rm -rf graderTestSuite/
-	-rm -f tmp/
+	-rm -rf tmp/
 
 grade: jlc
 	cd tests; make && ./Grade -b LLVM -x arrays1 . ..
