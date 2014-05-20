@@ -129,42 +129,37 @@ compileStmt s = case s of
   Empty -> return ()
   BStmt block -> compileBlock block
   Decl t (NoInit (Ident name) : rest) -> do
-    reg <- createRegisterFor name
     let llvmT = makeLLVMType t
+
+    reg <- createRegisterFor name
     emitInstr $ "%" ++ reg ++ " = alloca " ++ llvmT
     emitInstr $ "store " ++ llvmT ++ " " ++ initValue t ++ ", " ++ llvmT ++ "* %" ++ reg
+
     compileStmt (Decl t rest)
   Decl t (Init (Ident declaredName) expr : rest) -> do
     let llvmT = makeLLVMType t
+
     exprReg <- createRegister
     compileExpr exprReg expr
+
     reg <- createRegisterFor declaredName
     emitInstr $ "%" ++ reg ++ " = alloca " ++ llvmT
     store t exprReg reg
+
     compileStmt (Decl t rest)
   Decl _ _ -> return ()
   Ass (Ident name) expr@(ETyped _ t) -> do
     exprReg <- createRegister
     compileExpr exprReg expr
+
     reg <- registerFor name
     store t exprReg reg
-  Incr (Ident ident) -> do
-    resultReg <- createRegister
-    varReg <- createRegister
-    adrReg <- registerFor ident
-    emitInstr $ "%" ++ varReg ++ " = load i32* %" ++ adrReg
-    emitInstr $ "%" ++ resultReg ++ " = add i32 %" ++ varReg ++ ", 1"
-    store Int resultReg adrReg
-  Decr (Ident ident) -> do
-    resultReg <- createRegister
-    varReg <- createRegister
-    adrReg <- registerFor ident
-    emitInstr $ "%" ++ varReg ++ " = load i32* %" ++ adrReg
-    emitInstr $ "%" ++ resultReg ++ " = sub i32 %" ++ varReg ++ ", 1"
-    store Int resultReg adrReg
+  Incr (Ident ident) -> incrementDecrement ident "add"
+  Decr (Ident ident) -> incrementDecrement ident "sub"
   Ret e@(ETyped _ typ)    -> do
     exprReg <- createRegister
     compileExpr exprReg e
+
     emitInstr $ "ret " ++ makeLLVMType typ ++ " %" ++ exprReg
   Ret (ELitInt x) -> 
     emitInstr $ "ret " ++ makeLLVMType Int ++ " " ++ show x
@@ -177,25 +172,27 @@ compileStmt s = case s of
   VRet ->
     emitInstr "ret void"
   Cond expr stmt -> do
+    exprReg <- createRegister
+    compileExpr exprReg expr
+
     condLbl <- newLabel
     nextLbl <- newLabel
-    exprReg <- createRegister
-
-    compileExpr exprReg expr
     emitInstr $ "br i1 %" ++ exprReg ++ ", label %" ++ condLbl ++ ", label %" ++ nextLbl
+    
     emit $ condLbl ++ ":"
     scoped $ compileStmt stmt
     emitInstr $ "br label %" ++ nextLbl
 
     emit $ nextLbl ++ ":"
   CondElse expr stmt1 stmt2 -> do
-    lblIf <- newLabel
-    lblElse <- newLabel
-    nextLbl <- newLabel
     exprReg <- createRegister
-
     compileExpr exprReg expr
+
+    lblElse <- newLabel
+    lblIf <- newLabel
+    nextLbl <- newLabel
     emitInstr $ "br i1 %" ++ exprReg ++ ", label %" ++ lblIf ++ ", label %" ++ lblElse
+    
     emit $ lblIf ++ ":"
     scoped $ compileStmt stmt1
     emitInstr $ "br label %" ++ nextLbl
@@ -207,18 +204,18 @@ compileStmt s = case s of
     emit $ nextLbl ++ ":"
   While expr stmt -> do
     lblBegin <- newLabel
+    emitInstr $ "br label %" ++ lblBegin
+    
     lblLoop <- newLabel
     lblNext <- newLabel
-    condReg <- createRegister
-
-    emitInstr $ "br label %" ++ lblBegin
     emit $ lblBegin ++ ":"
     scoped $ do
+      condReg <- createRegister
       compileExpr condReg expr
       emitInstr $ "br i1 %" ++ condReg ++ ", label %" ++ lblLoop ++ ", label %" ++ lblNext
       emit $ lblLoop ++ ":"
       scoped $ compileStmt stmt
-    emitInstr $ "br label %" ++ lblBegin
+      emitInstr $ "br label %" ++ lblBegin
 
     emit $ lblNext ++ ":"
   For t (Ident ident) expr stmt -> do
@@ -293,22 +290,15 @@ compileStmt s = case s of
     emitInstr $ "br label %" ++ lblBegin
     emit $ lblNext ++ ":"
   ArrAss (Ident name) indexExpr valueExpr@(ETyped _ t) -> do
-    let llvmT     = makeLLVMType (Array t)
     let llvmElemT = makeLLVMType t
 
     -- Compile index i32
     indexReg <- createRegister
     compileExpr indexReg indexExpr
 
-    -- Index the array struct
+    -- Get pointer to array memory
     reg <- registerFor name
-    arrayPtrReg <- createRegister
-    emitInstr $ "%" ++ arrayPtrReg ++ " = getelementptr " ++ llvmT ++ "* " ++
-      "%" ++ reg ++ ", i32 0, i32 1"
-
-    -- Dereference pointer into array struct to point to the wrapped array
-    arrayDerefReg <- createRegister
-    emitInstr $ "%" ++ arrayDerefReg ++ " = load " ++ llvmElemT ++ "** %" ++ arrayPtrReg
+    arrayDerefReg <- getArrayMemoryReg reg t
 
     -- Index the array
     elemPtrReg <- createRegister
@@ -330,6 +320,28 @@ compileStmt s = case s of
       _ -> return ()
 
   stmt -> fail $ "CRITICAL ERROR: Unexpected stmt " ++ show stmt
+
+incrementDecrement :: String -> String -> GenM ()
+incrementDecrement ident fn = do
+    resultReg <- createRegister
+    varReg <- createRegister
+    adrReg <- registerFor ident
+    emitInstr $ "%" ++ varReg ++ " = load i32* %" ++ adrReg
+    emitInstr $ "%" ++ resultReg ++ " = " ++ fn ++ " i32 %" ++ varReg ++ ", 1"
+    store Int resultReg adrReg
+
+getArrayMemoryReg :: String -> Type -> GenM String
+getArrayMemoryReg arrayObjectReg t = do
+  -- Get pointer into the array memory
+  arrayPtrReg <- createRegister
+  emitInstr $ "%" ++ arrayPtrReg ++ " = getelementptr " ++ 
+    makeLLVMType (Array t) ++ "* " ++ "%" ++ arrayObjectReg ++ ", i32 0, i32 1"
+
+  -- Dereference pointer into array struct to point to the wrapped array
+  arrayDerefReg <- createRegister
+  emitInstr $ "%" ++ arrayDerefReg ++ " = load " ++ makeLLVMType t ++ "** %" ++ arrayPtrReg
+
+  return arrayDerefReg
 
 compileExpr :: String -> Expr -> GenM ()
 compileExpr resultReg ex = case ex of
@@ -375,100 +387,6 @@ compileExpr resultReg ex = case ex of
     emitInstr $ "%" ++ resultReg ++ 
         " = bitcast [" ++ show strLength ++ " x i8]* " ++ 
         "@" ++ stringVar ++ " to i8*"
-  Neg expr               -> do
-    exprType <- getCurrentExpType
-    let op = case exprType of Int  -> "sub"
-                              Doub -> "fsub"
-                              _    -> "undefined"
-    exprReg <- createRegister
-    compileExpr exprReg expr
-    emitInstr $ "%" ++ resultReg ++ " = " ++ op ++ " " 
-      ++ makeLLVMType exprType ++ " " ++ initValue exprType ++ ", %" ++ exprReg
-  Not expr               -> do
-    exprReg <- createRegister
-    compileExpr exprReg expr
-    emitInstr $ "%" ++ resultReg ++ " = xor i1 %" ++ exprReg ++ ", true"
-  EMul expr1 mulOp expr2 -> do
-    t <- getCurrentExpType
-    exprReg1 <- createRegister
-    exprReg2 <- createRegister
-    compileExpr exprReg1 expr1
-    compileExpr exprReg2 expr2
-    emitInstr $ "%" ++ resultReg ++ " = " ++ 
-        getMulOp t mulOp ++ " " ++ makeLLVMType t ++ 
-        " %" ++ exprReg1 ++ ", %" ++ exprReg2
-  EAdd expr1 addOp expr2 -> do
-    t <- getCurrentExpType
-    exprReg1 <- createRegister
-    exprReg2 <- createRegister
-    compileExpr exprReg1 expr1
-    compileExpr exprReg2 expr2
-    emitInstr $ "%" ++ resultReg ++ " = " ++ getAddOp t addOp ++ " " ++ makeLLVMType t ++ " %" ++ exprReg1 ++ ", %" ++ exprReg2
-  ERel expr1@(ETyped _ typ) relOp expr2 -> do
-    exprReg1 <- createRegister
-    exprReg2 <- createRegister
-    compileExpr exprReg1 expr1
-    compileExpr exprReg2 expr2
-    emitInstr $ "%" ++ resultReg ++ " = " ++ getRelOp typ relOp ++ " " ++ makeLLVMType typ ++ " %" ++ exprReg1 ++ ", %" ++ exprReg2
-  EAnd expr1 expr2 -> do
-    exprReg1 <- createRegister
-    exprReg2 <- createRegister
-
-    cmpMem1 <- createRegister
-    cmpMem2 <- createRegister
-    cmpReg1 <- createRegister
-    cmpReg2 <- createRegister
-
-    lblEval <- newLabel
-    lblEnd <- newLabel
-
-    emitInstr $ "%" ++ cmpMem1 ++ " = alloca i1"
-    emitInstr $ "%" ++ cmpMem2 ++ " = alloca i1"
-    emitInstr $ "store i1 false, i1* %" ++ cmpMem2
-
-    compileExpr exprReg1 expr1
-    store Bool exprReg1 cmpMem1
-    emitInstr $ "br i1 %" ++ exprReg1 ++ ", label %" ++ lblEval ++ ", label %" ++ lblEnd
-
-    emit $ lblEval ++ ":"
-    compileExpr exprReg2 expr2
-    store Bool exprReg2 cmpMem2
-    emitInstr $ "br label %" ++ lblEnd
-
-    emit $ lblEnd ++ ":"
-    emitInstr $ "%" ++ cmpReg1 ++ " = load i1* %" ++ cmpMem1
-    emitInstr $ "%" ++ cmpReg2 ++ " = load i1* %" ++ cmpMem2
-    emitInstr $ "%" ++ resultReg ++ " = and i1 %" ++ cmpReg1 ++ ", %" ++ cmpReg2 
-
-  EOr expr1 expr2 -> do
-    exprReg1 <- createRegister
-    exprReg2 <- createRegister
-
-    cmpMem1 <- createRegister
-    cmpMem2 <- createRegister
-    cmpReg1 <- createRegister
-    cmpReg2 <- createRegister
-
-    lblEval <- newLabel
-    lblEnd <- newLabel
-
-    emitInstr $ "%" ++ cmpMem1 ++ " = alloca i1"
-    emitInstr $ "%" ++ cmpMem2 ++ " = alloca i1"
-    emitInstr $ "store i1 false, i1* %" ++ cmpMem2
-
-    compileExpr exprReg1 expr1
-    store Bool exprReg1 cmpMem1
-    emitInstr $ "br i1 %" ++ exprReg1 ++ ", label %" ++ lblEnd ++ ", label %" ++ lblEval
-
-    emit $ lblEval ++ ":"
-    compileExpr exprReg2 expr2
-    store Bool exprReg2 cmpMem2
-    emitInstr $ "br label %" ++ lblEnd
-
-    emit $ lblEnd ++ ":"
-    emitInstr $ "%" ++ cmpReg1 ++ " = load i1* %" ++ cmpMem1
-    emitInstr $ "%" ++ cmpReg2 ++ " = load i1* %" ++ cmpMem2
-    emitInstr $ "%" ++ resultReg ++ " = or i1 %" ++ cmpReg1 ++ ", %" ++ cmpReg2 
 
   ENew t expr -> do
     let llvmT = makeLLVMType (Array t)
@@ -560,46 +478,137 @@ compileExpr resultReg ex = case ex of
 
     emitInstr $ "%" ++ resultReg ++ " = load i32* %" ++ elemPtrReg 
 
+  Neg expr               -> do
+    exprType <- getCurrentExpType
+    let op = case exprType of Int  -> "sub"
+                              Doub -> "fsub"
+                              _    -> "undefined"
+    exprReg <- createRegister
+    compileExpr exprReg expr
+    emitInstr $ "%" ++ resultReg ++ " = " ++ op ++ " " 
+      ++ makeLLVMType exprType ++ " " ++ initValue exprType ++ ", %" ++ exprReg
+  Not expr               -> do
+    exprReg <- createRegister
+    compileExpr exprReg expr
+    emitInstr $ "%" ++ resultReg ++ " = xor i1 %" ++ exprReg ++ ", true"
+
+  EMul e1 mulOp e2 -> compileBinaryOp (getMulOp mulOp) e1 e2 resultReg
+  EAdd e1 addOp e2 -> compileBinaryOp (getAddOp addOp) e1 e2 resultReg
+  ERel e1@(ETyped _ typ) relOp e2 -> do
+    setCurrentExpType typ
+    compileBinaryOp (getRelOp relOp) e1 e2 resultReg
+
+  EAnd expr1 expr2 -> do
+    exprReg1 <- createRegister
+    exprReg2 <- createRegister
+
+    cmpMem1 <- createRegister
+    cmpMem2 <- createRegister
+    cmpReg1 <- createRegister
+    cmpReg2 <- createRegister
+
+    lblEval <- newLabel
+    lblEnd <- newLabel
+
+    emitInstr $ "%" ++ cmpMem1 ++ " = alloca i1"
+    emitInstr $ "%" ++ cmpMem2 ++ " = alloca i1"
+    emitInstr $ "store i1 false, i1* %" ++ cmpMem2
+
+    compileExpr exprReg1 expr1
+    store Bool exprReg1 cmpMem1
+    emitInstr $ "br i1 %" ++ exprReg1 ++ ", label %" ++ lblEval ++ ", label %" ++ lblEnd
+
+    emit $ lblEval ++ ":"
+    compileExpr exprReg2 expr2
+    store Bool exprReg2 cmpMem2
+    emitInstr $ "br label %" ++ lblEnd
+
+    emit $ lblEnd ++ ":"
+    emitInstr $ "%" ++ cmpReg1 ++ " = load i1* %" ++ cmpMem1
+    emitInstr $ "%" ++ cmpReg2 ++ " = load i1* %" ++ cmpMem2
+    emitInstr $ "%" ++ resultReg ++ " = and i1 %" ++ cmpReg1 ++ ", %" ++ cmpReg2 
+
+  EOr expr1 expr2 -> do
+    exprReg1 <- createRegister
+    exprReg2 <- createRegister
+
+    cmpMem1 <- createRegister
+    cmpMem2 <- createRegister
+    cmpReg1 <- createRegister
+    cmpReg2 <- createRegister
+
+    lblEval <- newLabel
+    lblEnd <- newLabel
+
+    emitInstr $ "%" ++ cmpMem1 ++ " = alloca i1"
+    emitInstr $ "%" ++ cmpMem2 ++ " = alloca i1"
+    emitInstr $ "store i1 false, i1* %" ++ cmpMem2
+
+    compileExpr exprReg1 expr1
+    store Bool exprReg1 cmpMem1
+    emitInstr $ "br i1 %" ++ exprReg1 ++ ", label %" ++ lblEnd ++ ", label %" ++ lblEval
+
+    emit $ lblEval ++ ":"
+    compileExpr exprReg2 expr2
+    store Bool exprReg2 cmpMem2
+    emitInstr $ "br label %" ++ lblEnd
+
+    emit $ lblEnd ++ ":"
+    emitInstr $ "%" ++ cmpReg1 ++ " = load i1* %" ++ cmpMem1
+    emitInstr $ "%" ++ cmpReg2 ++ " = load i1* %" ++ cmpMem2
+    emitInstr $ "%" ++ resultReg ++ " = or i1 %" ++ cmpReg1 ++ ", %" ++ cmpReg2 
+
   ETyped expr typ -> do
     setCurrentExpType typ
     compileExpr resultReg expr
 
   expr -> fail $ "compileExpr pattern match failed on " ++ show expr
 
+compileBinaryOp :: (Type -> String) -> Expr -> Expr -> String -> GenM ()
+compileBinaryOp operatorFor expr1 expr2 resultReg = do
+    t <- getCurrentExpType
+    exprReg1 <- createRegister
+    exprReg2 <- createRegister
+    compileExpr exprReg1 expr1
+    compileExpr exprReg2 expr2
+    emitInstr $ "%" ++ resultReg ++ " = " ++ 
+        operatorFor t ++ " " ++ makeLLVMType t ++ 
+        " %" ++ exprReg1 ++ ", %" ++ exprReg2
+
 sizeof :: String -> String
 sizeof t = "ptrtoint ("++t++"* getelementptr ("++t++"* null, i32 1) to i32)"
 
-getMulOp :: Type -> MulOp -> String
-getMulOp Int Times  = "mul"
-getMulOp Int Div    = "sdiv"
-getMulOp Int Mod    = "srem"
-getMulOp Doub Times = "fmul"
-getMulOp Doub Div   = "fdiv"
-getMulOp Doub Mod   = "rem"
+getMulOp :: MulOp -> Type -> String
+getMulOp Times Int  = "mul"
+getMulOp Times Doub = "fmul"
+getMulOp Div   Int  = "sdiv"
+getMulOp Div   Doub = "fdiv"
+getMulOp Mod   Int  = "srem"
+getMulOp Mod   Doub = "rem"
 getMulOp _ _        = "undefinedMulOp"
 
-getAddOp :: Type -> AddOp -> String
-getAddOp Int Plus   = "add"
-getAddOp Int Minus  = "sub"
-getAddOp Doub Plus  = "fadd"
-getAddOp Doub Minus = "fsub"
+getAddOp :: AddOp -> Type -> String
+getAddOp Plus Int   = "add"
+getAddOp Plus Doub  = "fadd"
+getAddOp Minus Int  = "sub"
+getAddOp Minus Doub = "fsub"
 getAddOp _ _        = "undefinedAddAp"
 
-getRelOp :: Type -> RelOp -> String
-getRelOp Int LTH  = "icmp slt" 
-getRelOp Int LE   = "icmp sle"
-getRelOp Int GTH  = "icmp sgt"
-getRelOp Int GE   = "icmp sge"
-getRelOp Int EQU  = "icmp eq"
-getRelOp Int NE   = "icmp ne"
-getRelOp Doub LTH = "fcmp ult" 
-getRelOp Doub LE  = "fcmp ule"
-getRelOp Doub GTH = "fcmp ugt"
-getRelOp Doub GE  = "fcmp uge"
-getRelOp Doub EQU = "fcmp ueq"
-getRelOp Doub NE  = "fcmp une"
-getRelOp Bool EQU = "icmp eq"
-getRelOp Bool NE  = "icmp ne"
+getRelOp :: RelOp -> Type -> String
+getRelOp LTH Int  = "icmp slt" 
+getRelOp LE  Int  = "icmp sle"
+getRelOp GTH Int  = "icmp sgt"
+getRelOp GE  Int  = "icmp sge"
+getRelOp EQU Int  = "icmp eq"
+getRelOp NE  Int  = "icmp ne"
+getRelOp LTH Doub = "fcmp ult" 
+getRelOp LE  Doub = "fcmp ule"
+getRelOp GTH Doub = "fcmp ugt"
+getRelOp GE  Doub = "fcmp uge"
+getRelOp EQU Doub = "fcmp ueq"
+getRelOp NE  Doub = "fcmp une"
+getRelOp EQU Bool = "icmp eq"
+getRelOp NE  Bool = "icmp ne"
 getRelOp _ _      = "undefinedRelOp"
 
 initValue :: Type -> String
