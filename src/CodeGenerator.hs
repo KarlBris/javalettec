@@ -1,11 +1,8 @@
-{-# LANGUAGE TemplateHaskell #-}
-
 module CodeGenerator where
 
 import qualified Data.Map as M (Map, empty, insert, lookup)
-import Control.Lens (makeLenses, use, (.=), (%=), (^.), (+=))
-import Control.Monad (forM_, when, replicateM)
-import Control.Monad.State (StateT, execStateT)
+import Control.Monad (forM_, when, replicateM, liftM)
+import Control.Monad.State (StateT, execStateT, get, modify)
 import Data.List (intercalate, nub)
 
 import Grammar.ErrM (Err)
@@ -15,44 +12,43 @@ import Grammar.Abs
 type GenM a = StateT Env Err a
 
 data Env = Env {
-  _code           :: [String],
-  _currentExpType :: Maybe Type,
+  code           :: [String],
+  currentExpType :: Maybe Type,
 
-  _nextVariable   :: Int,
-  _nextLabel      :: Int,
-  _nextString     :: Int,
+  nextVariable   :: Int,
+  nextLabel      :: Int,
+  nextString     :: Int,
 
-  _stringLiterals :: [String],
-  _llvmNames      :: [M.Map String String],
-  _arrayTypes     :: [Type]
+  stringLiterals :: [String],
+  llvmNames      :: [M.Map String String],
+  arrayTypes     :: [Type]
 } deriving Show
 
 emptyEnv :: Env
 emptyEnv = Env {
-  _code = [],
-  _currentExpType = Nothing,
+  code = [],
+  currentExpType = Nothing,
 
-  _nextVariable = 0,
-  _nextLabel = 0,
-  _nextString = 0,
+  nextVariable = 0,
+  nextLabel = 0,
+  nextString = 0,
 
-  _stringLiterals = [],
-  _llvmNames = [],
-  _arrayTypes = []
+  stringLiterals = [],
+  llvmNames = [],
+  arrayTypes = []
 }
-
-makeLenses ''Env
 
 compilellvm :: Program -> Err String
 compilellvm p = do
   st <- execStateT (compileProgram p) emptyEnv
-  return $ unlines . reverse . (^. code) $ st 
+  return $ unlines . reverse . code $ st 
 
 compileProgram :: Program -> GenM ()
 compileProgram (Program topDefs) = do
   compileTopDefs topDefs
-  c <- use code
-  code .= []
+
+  topDefCode <- liftM code get
+  modify $ \s -> s { code = [] }
 
   emitStringLiterals
   mapM_ emit [
@@ -69,7 +65,7 @@ compileProgram (Program topDefs) = do
     ]
   emitArrayTypes
   
-  code %= (c++)
+  modify $ \s -> s { code = topDefCode ++ code s }
 
 compileTopDefs :: [TopDef] -> GenM ()
 compileTopDefs [] = return ()
@@ -510,50 +506,50 @@ compileExpr resultReg ex = case ex of
 
 compileBinaryOp :: (Type -> String) -> Expr -> Expr -> String -> GenM ()
 compileBinaryOp operatorFor expr1 expr2 resultReg = do
-    t <- getCurrentExpType
-    exprReg1 <- createRegister
-    exprReg2 <- createRegister
-    compileExpr exprReg1 expr1
-    compileExpr exprReg2 expr2
-    emitInstr $ "%" ++ resultReg ++ " = " ++ 
-        operatorFor t ++ " " ++ makeLLVMType t ++ 
-        " %" ++ exprReg1 ++ ", %" ++ exprReg2
+  t <- getCurrentExpType
+  exprReg1 <- createRegister
+  exprReg2 <- createRegister
+  compileExpr exprReg1 expr1
+  compileExpr exprReg2 expr2
+  emitInstr $ "%" ++ resultReg ++ " = " ++ 
+      operatorFor t ++ " " ++ makeLLVMType t ++ 
+      " %" ++ exprReg1 ++ ", %" ++ exprReg2
 
 compileAndOr :: Bool -> Expr -> Expr -> String -> GenM ()
 compileAndOr isAnd expr1 expr2 resultReg = do
-    exprReg1 <- createRegister
-    exprReg2 <- createRegister
+  exprReg1 <- createRegister
+  exprReg2 <- createRegister
 
-    cmpMem1 <- createRegister
-    cmpMem2 <- createRegister
-    cmpReg1 <- createRegister
-    cmpReg2 <- createRegister
+  cmpMem1 <- createRegister
+  cmpMem2 <- createRegister
+  cmpReg1 <- createRegister
+  cmpReg2 <- createRegister
 
-    lblEval <- newLabel
-    lblEnd  <- newLabel
+  lblEval <- newLabel
+  lblEnd  <- newLabel
 
-    emitInstr $ "%" ++ cmpMem1 ++ " = alloca i1"
-    emitInstr $ "%" ++ cmpMem2 ++ " = alloca i1"
-    emitInstr $ "store i1 false, i1* %" ++ cmpMem2
+  emitInstr $ "%" ++ cmpMem1 ++ " = alloca i1"
+  emitInstr $ "%" ++ cmpMem2 ++ " = alloca i1"
+  emitInstr $ "store i1 false, i1* %" ++ cmpMem2
 
-    compileExpr exprReg1 expr1
-    store Bool exprReg1 cmpMem1
+  compileExpr exprReg1 expr1
+  store Bool exprReg1 cmpMem1
 
-    let lblTrue = if isAnd then lblEval else lblEnd
-    let lblFalse = if isAnd then lblEnd else lblEval
-    emitInstr $ "br i1 %" ++ exprReg1 ++ ", label %" ++ lblTrue ++ ", label %" ++ lblFalse
+  let lblTrue = if isAnd then lblEval else lblEnd
+  let lblFalse = if isAnd then lblEnd else lblEval
+  emitInstr $ "br i1 %" ++ exprReg1 ++ ", label %" ++ lblTrue ++ ", label %" ++ lblFalse
 
-    emit $ lblEval ++ ":"
-    compileExpr exprReg2 expr2
-    store Bool exprReg2 cmpMem2
-    emitInstr $ "br label %" ++ lblEnd
+  emit $ lblEval ++ ":"
+  compileExpr exprReg2 expr2
+  store Bool exprReg2 cmpMem2
+  emitInstr $ "br label %" ++ lblEnd
 
-    emit $ lblEnd ++ ":"
-    emitInstr $ "%" ++ cmpReg1 ++ " = load i1* %" ++ cmpMem1
-    emitInstr $ "%" ++ cmpReg2 ++ " = load i1* %" ++ cmpMem2
-    emitInstr $ "%" ++ resultReg ++ " = " ++ 
-      (if isAnd then "and" else "or") ++ 
-      " i1 %" ++ cmpReg1 ++ ", %" ++ cmpReg2 
+  emit $ lblEnd ++ ":"
+  emitInstr $ "%" ++ cmpReg1 ++ " = load i1* %" ++ cmpMem1
+  emitInstr $ "%" ++ cmpReg2 ++ " = load i1* %" ++ cmpMem2
+  emitInstr $ "%" ++ resultReg ++ " = " ++ 
+    (if isAnd then "and" else "or") ++ 
+    " i1 %" ++ cmpReg1 ++ ", %" ++ cmpReg2 
 
 sizeof :: String -> String
 sizeof t = "ptrtoint ("++t++"* getelementptr ("++t++"* null, i32 1) to i32)"
@@ -604,27 +600,27 @@ emitInstr :: String -> GenM ()
 emitInstr s = emit $ "  " ++ s
 
 emit :: String -> GenM ()
-emit s = code %= (s:)
+emit line = modify $ \s -> s { code = line : code s }
 
 addStringLiteral :: String -> String -> GenM Int
 addStringLiteral stringVar string = do
   let escapedString = string ++ "\\00"
   let newLength = length string + 1
   let globalString = "@" ++ stringVar ++ " = internal constant [" ++ show newLength ++ " x i8] c\"" ++ escapedString ++ "\""
-  stringLiterals %= (globalString:)
+  modify $ \s -> s { stringLiterals = globalString : stringLiterals s }
   return newLength
 
 emitStringLiterals :: GenM ()
 emitStringLiterals = do
-  literals <- use stringLiterals
+  literals <- liftM stringLiterals get
   mapM_ emit literals
 
 addArrayType :: Type -> GenM ()
-addArrayType t = arrayTypes %= (t:)
+addArrayType t = modify $ \s -> s { arrayTypes = t : arrayTypes s }
 
 emitArrayTypes :: GenM ()
 emitArrayTypes = do
-  types <- use arrayTypes
+  types <- liftM arrayTypes get
   forM_ (nub types) $ \t -> do
     let llvmT = makeLLVMType t
     let typeName = makeLLVMType (Array t)
@@ -635,25 +631,29 @@ emitArrayTypes = do
         "}"
       ]
 
+insertHead :: Ord a => a -> b -> [M.Map a b] -> [M.Map a b]
+insertHead x y (s:ss) = M.insert x y s : ss
+insertHead _ _ [] = []
+
 createRegisterFor :: String -> GenM String
 createRegisterFor x = do 
-  var <- createRegister
-  llvmNames %= \(s:ss) -> M.insert x var s : ss
-  return var
+    var <- createRegister
+    modify $ \s -> s { llvmNames = insertHead x var (llvmNames s) }
+    return var
 
 createRegister :: GenM String
 createRegister = do
-  num <- use nextVariable
-  nextVariable += 1
+  num <- liftM nextVariable get
+  modify $ \s -> s { nextVariable = nextVariable s + 1 }
   return $ "var" ++ show num
 
 setRegisterForName :: String -> String -> GenM ()
 setRegisterForName name reg =
-  llvmNames %= \(s:ss) -> M.insert name reg s : ss
+  modify $ \s -> s { llvmNames = insertHead name reg (llvmNames s) }
 
 registerFor :: String -> GenM String
 registerFor name = do
-  scopes <- use llvmNames
+  scopes <- liftM llvmNames get
   lookIn scopes
   where
     lookIn [] = fail $ "CRITICAL ERROR: Variable " ++ name ++ " not reachable"
@@ -663,24 +663,24 @@ registerFor name = do
 
 newLabel :: GenM String
 newLabel = do
-  num <- use nextLabel
-  nextLabel += 1
+  num <- liftM nextLabel get
+  modify $ \s -> s { nextLabel = nextLabel s + 1 }
   return $ "lbl" ++ show num
 
 setCurrentExpType :: Type -> GenM ()
 setCurrentExpType t =
-  currentExpType .= Just t
+  modify $ \s -> s { currentExpType = Just t }
 
 getCurrentExpType :: GenM Type
 getCurrentExpType = do
-  expType <- use currentExpType
+  expType <- liftM currentExpType get
   case expType of
     Nothing -> fail "CRITICAL ERROR: currentExpType not set"
     Just x  -> return x
 
 scoped :: GenM a -> GenM a
 scoped fn = do
-  llvmNames %= (M.empty:)
+  modify $ \s -> s { llvmNames = M.empty : llvmNames s }
   value <- fn
-  llvmNames %= tail
+  modify $ \s -> s { llvmNames = tail $ llvmNames s }
   return value

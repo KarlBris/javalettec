@@ -1,11 +1,7 @@
-{-# LANGUAGE TemplateHaskell #-}
-
 module TypeChecker where
 
-import Control.Lens (makeLenses, use, (.=), (%=))
 import Control.Monad (liftM)
-import Control.Monad.State (StateT, evalStateT)
-import Data.Maybe (isJust)
+import Control.Monad.State (StateT, evalStateT, get, modify)
 
 import Grammar.ErrM (Err(Bad, Ok))
 import Grammar.Abs
@@ -14,31 +10,29 @@ import Grammar.Abs
 type CheckM a = StateT SEnv Err a
 
 data SEnv = E {
-  _fnType     :: Type,
-  _fnReturned :: Bool,
-  _symbols    :: SymbolTable,
-  _env        :: ScopeList
+  fnType     :: Type,
+  fnReturned :: Bool,
+  symbols    :: SymbolTable,
+  env        :: ScopeList
 } deriving Show
 
 emptySEnv :: SEnv
 emptySEnv = E {
-  _fnType            = Void,
-  _fnReturned        = False,
-  _symbols           = [],
-  _env               = []
+  fnType            = Void,
+  fnReturned        = False,
+  symbols           = [],
+  env               = []
 }
 
 type SymbolTable = [(Ident, ([Type], Type))]
 type ScopeList = [[(Ident, Type)]]
-
-makeLenses ''SEnv
 
 
 typecheck :: Program -> Err Program
 typecheck (Program topDefs) = do
   let ss = buildSymbolTable topDefs
   checkSymbolTable ss
-  typedTopDefs <- evalStateT (mapM typecheckTopDef topDefs) (emptySEnv{_symbols = ss})
+  typedTopDefs <- evalStateT (mapM typecheckTopDef topDefs) (emptySEnv{symbols = ss})
   return $ Program typedTopDefs
 
 buildSymbolTable :: [TopDef] -> SymbolTable
@@ -64,8 +58,8 @@ checkSymbolTable symbolTable
 
 typecheckTopDef :: TopDef -> CheckM TopDef
 typecheckTopDef (FnDef t ident args block) = do
-    fnType .= t
-    fnReturned .= False
+    modify $ \s -> s { fnType = t }
+    setFnReturned False
 
     enterScope
     mapM_ (\(Arg argtype argname) -> addVar argname argtype) args
@@ -73,7 +67,7 @@ typecheckTopDef (FnDef t ident args block) = do
     exitScope
 
     -- Check explicit return
-    didReturn <- use fnReturned
+    didReturn <- getFnReturned
     assert (didReturn || t == Void) "Implicit return for non-void function"
 
     return (FnDef t ident args typedBlock)
@@ -128,16 +122,16 @@ checkStmt s@(Decr ident) = do
   return s
 
 checkStmt (Ret expr) = do
-  declaredType <- use fnType
+  declaredType <- liftM fnType get
   typedExpr@(ETyped _ inferredType) <- inferExpr expr
   assert (declaredType == inferredType) $ 
       "Invalid return: expected " ++ show declaredType ++ 
       ", got " ++ show inferredType
-  fnReturned .= True
+  setFnReturned True
   return (Ret typedExpr)
 
 checkStmt VRet = do
-  t <- use fnType
+  t <- liftM fnType get
   assert (t == Void) $ "Invalid empty return for function of type " ++ show t
   return VRet
 
@@ -146,20 +140,20 @@ checkStmt (While expr stmt) = checkCondLike While expr stmt "While"
 checkStmt (Cond expr stmt) = checkCondLike Cond expr stmt "If"
 
 checkStmt (CondElse expr stmt1 stmt2) = do
-  alreadyReturned <- use fnReturned -- save current value of fnReturned
+  alreadyReturned <- getFnReturned -- save current value of fnReturned
 
   typedExpr@(ETyped _ t) <- inferExpr expr
   assert (t == Bool) $ "Non-bool condition to if-statement: " ++ show t
 
-  fnReturned .= False
+  setFnReturned False
   stmt1' <- checkStmt stmt1
-  didReturn1 <- use fnReturned
+  didReturn1 <- getFnReturned
 
-  fnReturned .= False
+  setFnReturned False
   stmt2' <- checkStmt stmt2
-  didReturn2 <- use fnReturned
+  didReturn2 <- getFnReturned
 
-  (fnReturned .=) $ alreadyReturned ||
+  setFnReturned $ alreadyReturned ||
       (didReturn1 && didReturn2) ||
       (didReturn1 && isLiterallyTrue typedExpr) ||
       (didReturn2 && isLiterallyFalse typedExpr)
@@ -186,8 +180,8 @@ checkStmt (SExp expr) = do
 
 checkCondLike :: (Expr -> Stmt -> Stmt) -> Expr -> Stmt -> String -> CheckM Stmt
 checkCondLike constr expr stmt name = do
-  alreadyReturned <- use fnReturned -- save current value of fnReturned
-  fnReturned .= False
+  alreadyReturned <- getFnReturned -- save current value of fnReturned
+  setFnReturned False
 
   typedExpr@(ETyped _ t) <- inferExpr expr
   assert (t == Bool) $
@@ -197,8 +191,8 @@ checkCondLike constr expr stmt name = do
       show expr
   typedStmt <- checkStmt stmt
 
-  didReturn <- use fnReturned
-  (fnReturned .=) $ alreadyReturned || (didReturn && isLiterallyTrue typedExpr)
+  didReturn <- getFnReturned
+  setFnReturned $ alreadyReturned || (didReturn && isLiterallyTrue typedExpr)
   
   return (constr typedExpr typedStmt)
 
@@ -263,10 +257,10 @@ inferExpr ELitFalse =
   return $ ETyped ELitFalse Bool
 
 inferExpr (EApp ident argexprs) = do
-    ss <- use symbols
+    st <- get
     typedargexprs <- mapM inferExpr argexprs
 
-    ret <- case lookup ident ss of
+    ret <- case lookup ident (symbols st) of
       Nothing -> fail $ "Attempt to call undeclared function " ++ show ident
       Just (argtypes, rettype) -> do
         assert (length argtypes == length argexprs) $
@@ -367,8 +361,8 @@ inferBoolRelExpr c expr1 expr2 name = inferBinary c expr1 expr2 $ \t1 t2 -> do
 
 lookupVar :: Ident -> CheckM Type
 lookupVar name = do
-    scopes <- use env
-    recursiveLookup scopes name
+    st <- get
+    recursiveLookup (env st) name
   where
     recursiveLookup :: ScopeList -> Ident -> CheckM Type
     recursiveLookup [] x       = fail $ "CRITICAL ERROR: No scope to find " ++ show x
@@ -378,32 +372,36 @@ lookupVar name = do
 
 addVar :: Ident -> Type -> CheckM ()
 addVar var t = do
-    ss <- use env
-    ss' <- addVar' ss
-    env .= ss'
+    st <- get
+    modifiedScopes <- addToHead (env st)
+    modify $ \s -> s { env = modifiedScopes }
   where
-    addVar' []     = fail $ "CRITICAL: Tried to add variable " ++
+    addToHead []     = fail $ "CRITICAL: Tried to add variable " ++
                             show var ++
                             " to environment without scopes"
-    addVar' (x:xs) | isJust (lookup var x) = fail $
-                                              "Redeclaration of variable " ++
-                                              show var
-                   | otherwise = return $ ((var, t):x):xs
+    addToHead (x:xs) = case lookup var x of
+      Just _  -> fail $ "Redeclaration of variable " ++ show var
+      Nothing -> return $ ((var, t):x):xs
 
 enterScope :: CheckM ()
-enterScope = env %= ([]:)
+enterScope = modify $ \s -> s { env = [] : env s }
 
 exitScope :: CheckM ()
-exitScope = env %= exitScope'
+exitScope = modify $ \s -> s { env = tryTail (env s)}
   where
-    exitScope' :: ScopeList -> ScopeList
-    exitScope' [] = fail "Something went wrong! Tried to exit a block illegally"
-    exitScope' xs = tail xs
+    tryTail :: ScopeList -> ScopeList
+    tryTail [] = fail "Something went wrong! Tried to exit a block illegally"
+    tryTail xs = tail xs
+
+setFnReturned :: Bool -> CheckM ()
+setFnReturned b = modify $ \s -> s { fnReturned = b }
+
+getFnReturned :: CheckM Bool
+getFnReturned = liftM fnReturned get
 
 assert :: Bool -> String -> CheckM ()
 assert True _    = return ()
 assert False msg = fail msg
-
 
 duplicates :: Eq a => [a] -> [a]
 duplicates [] = []

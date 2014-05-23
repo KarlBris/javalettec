@@ -4,7 +4,7 @@ It is currently incomplete;
 it can not interpret or produce executables from javalette source code.
 
 ## Dependencies
-* GHC with the Lens package
+* GHC
 * BNFC
 * Alex and Happy haskell libraries
 
