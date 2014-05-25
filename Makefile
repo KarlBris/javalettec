@@ -24,5 +24,5 @@ test: jlc
 	@rm -rf tmp/
 
 package:
-	cd src && make jlc distclean
-	tar -cvz --exclude-vcs --exclude .gitkeep --exclude *.tar.gz -f partB-1.tar.gz doc lib src
+	cd src && make distclean
+	tar -cvz --exclude-vcs --exclude .gitkeep --exclude *.tar.gz -f partB-4.tar.gz doc lib src

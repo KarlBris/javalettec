@@ -1,7 +1,6 @@
 # JLC
-An experimental compiler for the Javalette language.
-It is currently incomplete;
-it can not interpret or produce executables from javalette source code.
+An experimental compiler for the Javalette language, 
+with a language extension for one-dimensional arrays and for loops.
 
 ## Dependencies
 * GHC
@@ -42,5 +41,5 @@ directory as this file.
 
 ## Implementation
 There was a bit of ambiguity in the specification regarding if argument 
-variables could be overloaded in the base scope of a function body, so we 
-decided that it should not be allowed.
+variables could be shadowed in the base scope of a function body, so we 
+decided that argument shadowing should not be allowed - this means function arguments are declared in the same scope as the root scope of the function.
